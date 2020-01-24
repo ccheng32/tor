@@ -5322,18 +5322,18 @@ options_init_from_torrc(int argc, char **argv)
 
   if (retval < 0)
     goto err;
-  +  if (authdir_mode_v3(get_options())) {
-       const config_line_t *max_b_line = config_line_find(cmdline_only_options, "--max-relay-bandwidth");
-       const config_line_t *min_b_line = config_line_find(cmdline_only_options, "--min-relay-bandwidth");
-       const config_line_t *circ_est_line = config_line_find(cmdline_only_options, "--total-num-circ-est");
-       tor_assert(max_b_line && min_b_line && circ_est_line);
-       int max_b, min_b, num_circ_est;
-       sscanf(max_b_line->value, "%d", &max_b);
-       sscanf(min_b_line->value, "%d", &min_b);
-       set_control_weight_num_bins(min_b, max_b);
-       sscanf(circ_est_line->value, "%d", &num_circ_est);
-       set_total_num_circ_est(num_circ_est);
-     }
+  if (authdir_mode_v3(get_options())) {
+    const config_line_t *max_b_line = config_line_find(cmdline_only_options, "--max-relay-bandwidth");
+    const config_line_t *min_b_line = config_line_find(cmdline_only_options, "--min-relay-bandwidth");
+    const config_line_t *circ_est_line = config_line_find(cmdline_only_options, "--total-num-circ-est");
+    tor_assert(max_b_line && min_b_line && circ_est_line);
+    int max_b, min_b, num_circ_est;
+    sscanf(max_b_line->value, "%d", &max_b);
+    sscanf(min_b_line->value, "%d", &min_b);
+    set_control_weight_num_bins(min_b, max_b);
+    sscanf(circ_est_line->value, "%d", &num_circ_est);
+    set_total_num_circ_est(num_circ_est);
+  }
 
   if (config_line_find(cmdline_only_options, "--no-passphrase")) {
     if (command == CMD_KEYGEN) {
