@@ -101,6 +101,9 @@
 extern const char DIRVOTE_UNIVERSAL_FLAGS[];
 extern const char DIRVOTE_OPTIONAL_FLAGS[];
 
+void set_control_weight_num_bins(int min_b, int max_b);
+void set_total_num_circ_est(int est);
+
 /*
  * Public API. Used outside of the dirauth subsystem.
  *

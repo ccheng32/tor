@@ -4,6 +4,9 @@
 /* See LICENSE for licensing information */
 
 #define DIRVOTE_PRIVATE
+#include <float.h>
+#include <math.h>
+
 #include "core/or/or.h"
 #include "app/config/config.h"
 #include "core/or/policies.h"
@@ -61,6 +64,12 @@
 #include "lib/encoding/confline.h"
 #include "lib/crypt_ops/crypto_format.h"
 
+// TODO(ccheng32): Pass quantization base in as a cmd line argument.
+#define QUANTIZATION_BASE 1.1
+// TODO(ccheng32): The initial control weight should preferably be set 
+// to 1 / (number of total exit relays.)
+#define INITIAL_CONTROL_WEIGHT (1.0 / 80.0)
+
 /* Algorithm to use for the bandwidth file digest. */
 #define DIGEST_ALG_BW_FILE DIGEST_SHA256
 
@@ -113,6 +122,16 @@ typedef struct pending_consensus_t {
   networkstatus_t *consensus;
 } pending_consensus_t;
 
+typedef struct relay_weight_est {
+  uint32_t addr; /**< IPv4 address for this router, in host order. */
+  double prev_weight;
+  uint32_t prev_published_bandwidth;
+  // TODO(ccheng32): Add a flag here to specify whether the relay is
+  // active in this round.
+  double* weight_array; 
+} relay_weight_est_t;
+
+
 /* DOCDOC dirvote_add_signatures_to_all_pending_consensuses */
 static int dirvote_add_signatures_to_all_pending_consensuses(
                        const char *detached_signatures_body,
@@ -131,6 +150,75 @@ static int dirvote_perform_vote(void);
 static void dirvote_clear_votes(int all_votes);
 static int dirvote_compute_consensuses(void);
 static int dirvote_publish_consensus(void);
+
+static int control_weight_num_bins;
+static double* control_weight_bin_mids;
+static smartlist_t* get_control_weight_matrix(void);
+smartlist_t* control_weight_matrix;
+int total_num_circ_est;
+
+static 
+int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_member)
+{
+  /* No alignment issue here, since _key really is a pointer to uint32_t */
+  const uint32_t addr = *(uint32_t *)_key;
+  const relay_weight_est_t *entry = *_member;
+  if (addr < entry->addr)
+    return -1;
+  else if (addr > entry->addr)
+    return 1;
+  else
+    return 0;
+}
+
+static 
+relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr) {
+  relay_weight_est_t* res = (relay_weight_est_t*) malloc(sizeof(relay_weight_est_t));
+  res->addr = addr;
+  res->prev_weight = INITIAL_CONTROL_WEIGHT;
+  res->prev_published_bandwidth = 0;
+  res->weight_array = (double*) calloc(control_weight_num_bins, sizeof(double));
+  return res;
+}
+
+// Returns log(xx!).
+static
+double logfac(int xx) {
+  if (xx <= 0) return 0.0;
+  double ans = 0.0;
+  for (int i = 1; i <= xx; i++)
+    ans += log((double) i);
+  return ans;
+}
+
+static 
+double husseins_function(int x_t1, double w_t) {
+  double term1 = logfac(total_num_circ_est) - logfac (x_t1)
+      - logfac(total_num_circ_est - x_t1);
+  double term2 = x_t1 * log(w_t);
+  double term3 = (double) (total_num_circ_est - x_t1) * log(1 - w_t);
+  return term1 + term2 + term3;
+}
+
+static
+uint32_t control_weight_compute_published_bandwidth(
+    relay_weight_est_t* entry, uint32_t obs) {
+  double max_mid = 0.0, max_array_entry = -DBL_MAX;
+  for (int i = 0; i < control_weight_num_bins; i++) {
+    int x_t1 = (int) round(control_weight_bin_mids[i] / obs - 1.0);
+    if (x_t1 < 0 || x_t1 > total_num_circ_est) {
+      entry->weight_array[i] = -DBL_MAX;
+      continue;
+    }
+    entry->weight_array[i] += husseins_function(x_t1, entry->prev_weight);
+    if (entry->weight_array[i] > max_array_entry) {
+      max_array_entry = entry->weight_array[i];
+      max_mid = control_weight_bin_mids[i];
+    }
+  }
+  entry->prev_published_bandwidth = (uint32_t) max_mid;
+  return (uint32_t) max_mid;
+}
 
 /* =====
  * Certificate functions
@@ -1917,6 +2005,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
     /* Now go through all the votes */
     flag_counts = tor_calloc(smartlist_len(flags), sizeof(int));
     const int num_routers = dircollator_n_routers(collator);
+    double total_published_bandwidths = 0.0;
     for (i = 0; i < num_routers; ++i) {
       vote_routerstatus_t **vrs_lst =
         dircollator_get_votes_for_router(collator, i);
@@ -2129,6 +2218,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
         rs_out.has_bandwidth = 1;
         rs_out.bw_is_unmeasured = 0;
         rs_out.bandwidth_kb = median_uint32(measured_bws_kb, num_mbws);
+        log_debug(LD_DIR, "Bandwidth is measured.");
       } else if (num_bandwidths > 0) {
         rs_out.has_bandwidth = 1;
         rs_out.bw_is_unmeasured = 1;
@@ -2139,10 +2229,31 @@ networkstatus_compute_consensus(smartlist_t *votes,
             rs_out.bandwidth_kb = max_unmeasured_bw_kb;
           }
         }
+        log_debug(LD_DIR, "Bandwidth is unmeasured.");
       }
 
       /* Fix bug 2203: Do not count BadExit nodes as Exits for bw weights */
       is_exit = is_exit && !is_bad_exit;
+
+      /* Add logic to calculate the best weights for all exit relays. */
+      if (is_exit) {
+        smartlist_t* mat = get_control_weight_matrix();
+	int relay_idx, found;
+	relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
+	    relay_weight_est_compare_key_to_entry_, &found);
+	if (!found) {
+	  relay_weight_est_t* entry = relay_weight_est_t_new(rs_out.addr);
+	  smartlist_insert(mat, relay_idx, entry);
+	}
+        relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
+	uint32_t published_bandwidth = control_weight_compute_published_bandwidth(target_entry, 
+	    rs_out.bandwidth_kb);
+        log_info(LD_DIR, "Exit router: %d.", rs_out.addr);
+        log_info(LD_DIR, "Old measured bandwidth: %d.", rs_out.bandwidth_kb);
+        log_info(LD_DIR, "New published bandwidth: %d.", published_bandwidth);
+	rs_out.bandwidth_kb = published_bandwidth;
+        total_published_bandwidths += (double) published_bandwidth;
+      }
 
       /* Update total bandwidth weights with the bandwidths of this router. */
       {
@@ -2295,6 +2406,13 @@ networkstatus_compute_consensus(smartlist_t *votes,
 
       /* And the loop is over and we move on to the next router */
     }
+
+    // Normalize the weights with the total published bandwidth.
+    // TODO(ccheng32): Handle situation where relays come and go (inactive).
+    smartlist_t* final_mat = get_control_weight_matrix();
+    SMARTLIST_FOREACH_BEGIN(final_mat, relay_weight_est_t*, rwe) {
+      rwe->prev_weight = (double) rwe->prev_published_bandwidth / total_published_bandwidths;
+    } SMARTLIST_FOREACH_END(rwe);
 
     tor_free(size);
     tor_free(n_voter_flags);
@@ -4391,6 +4509,32 @@ clear_status_flags_on_sybil(routerstatus_t *rs)
   /* FFFF we might want some mechanism to check later on if we
    * missed zeroing any flags: it's easy to add a new flag but
    * forget to add it to this clause. */
+}
+
+static
+smartlist_t* get_control_weight_matrix(void) {
+  if (control_weight_matrix == NULL)
+    control_weight_matrix = smartlist_new();
+  return control_weight_matrix;
+}
+
+void set_control_weight_num_bins(int min_b, int max_b) {
+  double bounded_min_b = min_b - QUANTIZATION_BASE / 2;
+  control_weight_num_bins = (int)ceil(log((double)max_b - bounded_min_b) / log(QUANTIZATION_BASE));
+  control_weight_bin_mids = (double*) malloc(sizeof(double) * control_weight_num_bins);
+  double base = 1.0, curr = (double) bounded_min_b, next;
+  for (int i = 0; i < control_weight_num_bins; i++) {
+    base *= QUANTIZATION_BASE;
+    next = bounded_min_b + base;
+    control_weight_bin_mids[i] = (curr + next) / 2.0;
+    curr = next;
+  }
+  log_debug(LD_DIR, "Created %d bins with min %lf and Max %lf.", control_weight_num_bins,
+      control_weight_bin_mids[0], control_weight_bin_mids[control_weight_num_bins - 1]);
+}
+
+void set_total_num_circ_est(int est) {
+  total_num_circ_est = est;
 }
 
 /** Space-separated list of all the flags that we will always vote on. */
