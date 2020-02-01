@@ -68,7 +68,7 @@
 #define QUANTIZATION_BASE 1.1
 // TODO(ccheng32): The initial control weight should preferably be set 
 // to 1 / (number of total exit relays.)
-#define INITIAL_CONTROL_WEIGHT (1.0 / 80.0)
+#define INITIAL_CONTROL_WEIGHT (1.0 / 8.0)
 
 /* Algorithm to use for the bandwidth file digest. */
 #define DIGEST_ALG_BW_FILE DIGEST_SHA256
@@ -192,11 +192,19 @@ double logfac(int xx) {
 }
 
 static 
-double husseins_function(int x_t1, double w_t) {
+double husseins_binomial_function(int x_t1, double w_t) {
   double term1 = logfac(total_num_circ_est) - logfac (x_t1)
       - logfac(total_num_circ_est - x_t1);
   double term2 = x_t1 * log(w_t);
   double term3 = (double) (total_num_circ_est - x_t1) * log(1 - w_t);
+  return term1 + term2 + term3;
+}
+
+static 
+double husseins_poisson_function(int x_t1, double w_t) {
+  double term1 = -total_num_circ_est * w_t;
+  double term2 = -logfac(x_t1);
+  double term3 = x_t1 * log(total_num_circ_est*w_t);
   return term1 + term2 + term3;
 }
 
@@ -210,7 +218,8 @@ uint32_t control_weight_compute_published_bandwidth(
       entry->weight_array[i] = -DBL_MAX;
       continue;
     }
-    entry->weight_array[i] += husseins_function(x_t1, entry->prev_weight);
+    if (entry->weight_array[i] > -DBL_MAX)
+       entry->weight_array[i] += husseins_poisson_function(x_t1, entry->prev_weight);
     if (entry->weight_array[i] > max_array_entry) {
       max_array_entry = entry->weight_array[i];
       max_mid = control_weight_bin_mids[i];
@@ -2248,7 +2257,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
 	uint32_t published_bandwidth = control_weight_compute_published_bandwidth(target_entry, 
 	    rs_out.bandwidth_kb);
-        log_info(LD_DIR, "Exit router: %d.", rs_out.addr);
+        log_info(LD_DIR, "Exit router: %x.", rs_out.addr);
         log_info(LD_DIR, "Old measured bandwidth: %d.", rs_out.bandwidth_kb);
         log_info(LD_DIR, "New published bandwidth: %d.", published_bandwidth);
 	rs_out.bandwidth_kb = published_bandwidth;
@@ -4527,9 +4536,10 @@ void set_control_weight_num_bins(int min_b, int max_b) {
     base *= QUANTIZATION_BASE;
     next = bounded_min_b + base;
     control_weight_bin_mids[i] = (curr + next) / 2.0;
+    log_info(LD_DIR, "Mid %d: %lf", i, control_weight_bin_mids[i]);
     curr = next;
   }
-  log_debug(LD_DIR, "Created %d bins with min %lf and Max %lf.", control_weight_num_bins,
+  log_info(LD_DIR, "Created %d bins with min %lf and Max %lf.", control_weight_num_bins,
       control_weight_bin_mids[0], control_weight_bin_mids[control_weight_num_bins - 1]);
 }
 
