@@ -2462,6 +2462,11 @@ static const struct {
   { "--defaults-torrc",       ARGUMENT_NECESSARY },
   { "--hash-password",        ARGUMENT_NECESSARY },
   { "--dump-config",          ARGUMENT_OPTIONAL },
+
+   { "--shadow-memory-address",ARGUMENT_NECESSARY },
+   { "--shadow-lock-address",  ARGUMENT_NECESSARY },
+   { "--shadow-list-counter-address",  ARGUMENT_NECESSARY },
+
   { "--list-fingerprint",     TAKES_NO_ARGUMENT },
   { "--keygen",               TAKES_NO_ARGUMENT },
   { "--key-expiration",       ARGUMENT_OPTIONAL },
@@ -5286,6 +5291,26 @@ options_init_from_torrc(int argc, char **argv)
       command = CMD_VERIFY_CONFIG;
     }
   }
+
+
+    const config_line_t *shadow_counter_addr_line = config_line_find(cmdline_only_options,
+                                                           "--shadow-list-counter-address");
+    const config_line_t *shadow_addr_line = config_line_find(cmdline_only_options,
+                                                           "--shadow-memory-address");
+    const config_line_t *shadow_lock_addr_line = config_line_find(cmdline_only_options,
+                                                           "--shadow-lock-address");
+    // in this modified version we MUST have both addresses present
+    tor_assert(shadow_addr_line && shadow_lock_addr_line && shadow_counter_addr_line);
+
+    // scan list address
+    sscanf(shadow_addr_line->value, "%p", &shadow_global_circuit_list);
+    log_info(LD_CONFIG, "BALANCE: Shared circuit list at address %p", shadow_global_circuit_list);
+    // scan list counter
+    sscanf(shadow_counter_addr_line->value, "%p", &shadow_global_circuit_list_counter);
+    log_info(LD_CONFIG, "BALANCE: Shared circuit list counter at address %p", shadow_global_circuit_list_counter);
+    // scan lock address
+    sscanf(shadow_lock_addr_line->value, "%p", &shadow_global_circuit_list_lock);
+    log_info(LD_CONFIG, "BALANCE: Shared circuit list lock at address %p", shadow_global_circuit_list_lock);
 
   if (command == CMD_HASH_PASSWORD) {
     cf_defaults = tor_strdup("");

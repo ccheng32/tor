@@ -139,6 +139,8 @@ struct origin_circuit_t {
    * present. */
   int global_origin_circuit_list_idx;
 
+  int shadow_global_circuit_list_idx;
+
   /** How many more relay_early cells can we send on this circuit, according
    * to the specification? */
   unsigned int remaining_relay_early_cells : 4;

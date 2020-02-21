@@ -54,6 +54,8 @@
 #define OCIRC_EVENT_PRIVATE
 #include "lib/cc/torint.h"  /* TOR_PRIuSZ */
 
+#define SHADOW_MAX_SHARED_CIRCUITS 100000
+
 #include "core/or/or.h"
 #include "core/or/channel.h"
 #include "core/or/channeltls.h"
@@ -650,6 +652,31 @@ circuit_add_to_origin_circuit_list(origin_circuit_t *origin_circ)
   origin_circ->global_origin_circuit_list_idx = smartlist_len(lst) - 1;
 }
 
+struct circuit_info*
+circuit_get_shadow_global_circuit_list(void)
+{
+  // This if statement probably never executes
+  // the list should have been allocated in shadow
+  // design choice?
+  if (NULL == *shadow_global_circuit_list) {
+    *shadow_global_circuit_list = (struct circuit_info*) malloc(sizeof(struct circuit_info) * SHADOW_MAX_SHARED_CIRCUITS);
+    log_warn(LD_BUG, "BALANCE: Shared list in shadow is not initialized.");
+  }
+  return *shadow_global_circuit_list;
+}
+
+int
+circuit_get_shadow_global_circuit_list_size(void)
+{
+  return *shadow_global_circuit_list_counter;
+}
+
+static void
+circuit_increment_shadow_global_circuit_list_size(void)
+{
+  *shadow_global_circuit_list_counter += 1;
+}
+
 /** Detach from the global circuit list, and deallocate, all
  * circuits that have been marked for close.
  */
@@ -682,6 +709,71 @@ circuit_close_all_marked(void)
   } SMARTLIST_FOREACH_END(circ);
 
   smartlist_clear(circuits_pending_close);
+}
+
+static void print_ip(uint32_t ip)
+{
+    unsigned char bytes[4];
+    bytes[0] = ip & 0xFF;
+    bytes[1] = (ip >> 8) & 0xFF;
+    bytes[2] = (ip >> 16) & 0xFF;
+    bytes[3] = (ip >> 24) & 0xFF;
+    log_debug(LD_CIRC, "%d.%d.%d.%d", bytes[0], bytes[1], bytes[2], bytes[3]);
+}
+
+int getR(struct relayInfo* output){
+  struct circuit_info *lst = circuit_get_shadow_global_circuit_list();
+  const int lst_size = circuit_get_shadow_global_circuit_list_size();
+  int relayNum = 0;
+
+  for (int i = 0; i < lst_size; i++) {
+    for(int k = 0; k < 3; k++) {
+      int relay_match = 0;
+      for(int j = 0; j< relayNum; j++){  //check if there is already  a relayinfo for this ip
+        if(output[j].addr.addr.dummy_ == lst[i].relays[k].addr.dummy_){  //match found
+          output[j].circuits[output[j].circuitNum] = lst[i].index;
+          output[j].circuitNum+=1;
+	  relay_match = 1;
+	  break;
+        }
+      }
+      if (relay_match == 0) { //no existing match
+          output[relayNum].circuitNum = 1;
+          output[relayNum].circuits[0] = lst[i].index;
+          output[relayNum].addr = lst[i].relays[k];
+          relayNum += 1;
+      }
+    }
+  }
+  return relayNum;
+}
+
+/** BALANCE: Similar to circuit_add_to_origin_circuit_list, but adds to globally
+ *  shared circuit list maintained by Shadow. Router info must be filled out already in
+ *  origin_circ.*/
+void
+circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ)
+{
+  pthread_mutex_lock(shadow_global_circuit_list_lock);
+  tor_assert(origin_circ->shadow_global_circuit_list_idx == -1);
+  struct circuit_info *lst = circuit_get_shadow_global_circuit_list();
+  const int lst_size = circuit_get_shadow_global_circuit_list_size();
+  for (int i = 0; i < lst_size; i++) {
+    struct circuit_info currCircuit = lst[i];
+    log_debug(LD_CIRC, "Hello circ %d:", currCircuit.index);
+    print_ip(currCircuit.relays[0].addr.dummy_);
+    print_ip(currCircuit.relays[1].addr.dummy_);
+    print_ip(currCircuit.relays[2].addr.dummy_);
+  }
+  crypt_path_t* cpath = origin_circ->cpath;
+  lst[lst_size].index = lst_size;
+  for (int i = 0; i < 3; i++) {
+    lst[lst_size].relays[i] = cpath->extend_info->addr;
+    cpath = cpath->next;
+  }
+  origin_circ->shadow_global_circuit_list_idx = lst_size;
+  circuit_increment_shadow_global_circuit_list_size();
+  pthread_mutex_unlock(shadow_global_circuit_list_lock);
 }
 
 /** Return a pointer to the global list of circuits. */
@@ -1029,7 +1121,9 @@ origin_circuit_new(void)
 
   /* Add to origin-list. */
   circ->global_origin_circuit_list_idx = -1;
+  circ->shadow_global_circuit_list_idx = -1;
   circuit_add_to_origin_circuit_list(circ);
+
 
   circuit_build_times_update_last_circ(get_circuit_build_times_mutable());
 
