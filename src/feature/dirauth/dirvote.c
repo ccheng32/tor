@@ -66,9 +66,8 @@
 
 // TODO(ccheng32): Pass quantization base in as a cmd line argument.
 #define QUANTIZATION_BASE 1.1
-// TODO(ccheng32): The initial control weight should preferably be set 
-// to 1 / (number of total exit relays.)
-#define INITIAL_CONTROL_WEIGHT (1.0 / 8.0)
+#define MIN_NOISE 0.7
+#define MAX_NOISE 1.1
 
 /* Algorithm to use for the bandwidth file digest. */
 #define DIGEST_ALG_BW_FILE DIGEST_SHA256
@@ -155,7 +154,8 @@ static int control_weight_num_bins;
 static double* control_weight_bin_mids;
 static smartlist_t* get_control_weight_matrix(void);
 smartlist_t* control_weight_matrix;
-int total_num_circ_est;
+static int total_num_circ_est;
+static int control_weight_round_counter;
 
 static 
 int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_member)
@@ -175,9 +175,12 @@ static
 relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr) {
   relay_weight_est_t* res = (relay_weight_est_t*) malloc(sizeof(relay_weight_est_t));
   res->addr = addr;
-  res->prev_weight = INITIAL_CONTROL_WEIGHT;
+  res->prev_weight = 0;
   res->prev_published_bandwidth = 0;
   res->weight_array = (double*) calloc(control_weight_num_bins, sizeof(double));
+  log_info(LD_DIR, "Bin values %x", res->addr);
+  for (int i = 0; i < control_weight_num_bins; i++)
+    log_info(LD_DIR, "%lf: %lf", control_weight_bin_mids[i], res->weight_array[i]);
   return res;
 }
 
@@ -208,24 +211,54 @@ double husseins_poisson_function(int x_t1, double w_t) {
   return term1 + term2 + term3;
 }
 
+static 
+double husseins_noisy_poisson_function(int x_t1, int x_t2, double w_t, double obs, double mid) {
+  double ans = 0.0;
+  for (int x_t = x_t1; x_t <= x_t2; x_t++) {
+    double product = 1.0;
+    product *= exp(-total_num_circ_est * w_t);
+    // TODO(ccheng32): Will overflow for larger x_t.
+    product *= exp(-logfac(x_t));
+    product *= pow(total_num_circ_est*w_t, x_t);
+    product *= exp(-(0.5) *pow((obs*(x_t+1) / mid - 1)/0.5, 2));
+    ans += product;
+  }
+  return log(ans);
+}
+
 static
 uint32_t control_weight_compute_published_bandwidth(
-    relay_weight_est_t* entry, uint32_t obs) {
+    relay_weight_est_t* entry, uint32_t obs, consensus_flavor_t flavor) {
+  if (flavor == 0) {
+    for (int i = 0; i < control_weight_num_bins; i++) {
+      int x_t1 = (int) round(MIN_NOISE * control_weight_bin_mids[i] / obs - 1.0);
+      int x_t2 = (int) round(MAX_NOISE * control_weight_bin_mids[i] / obs - 1.0);
+      if (x_t1 < 0) x_t1 = 0;
+      if (x_t2 < 0 || x_t1 > total_num_circ_est) {
+        entry->weight_array[i] = -DBL_MAX;
+        continue;
+      }
+      if (x_t1 > total_num_circ_est ) x_t1 = total_num_circ_est;
+      if (entry->weight_array[i] > -DBL_MAX)
+         entry->weight_array[i] += husseins_noisy_poisson_function(x_t1, x_t2,
+             entry->prev_weight, obs, control_weight_bin_mids[i]);
+    }
+  }
+
+  // Find the maximum entry.
   double max_mid = 0.0, max_array_entry = -DBL_MAX;
   for (int i = 0; i < control_weight_num_bins; i++) {
-    int x_t1 = (int) round(control_weight_bin_mids[i] / obs - 1.0);
-    if (x_t1 < 0 || x_t1 > total_num_circ_est) {
-      entry->weight_array[i] = -DBL_MAX;
-      continue;
-    }
-    if (entry->weight_array[i] > -DBL_MAX)
-       entry->weight_array[i] += husseins_poisson_function(x_t1, entry->prev_weight);
     if (entry->weight_array[i] > max_array_entry) {
       max_array_entry = entry->weight_array[i];
       max_mid = control_weight_bin_mids[i];
     }
   }
-  entry->prev_published_bandwidth = (uint32_t) max_mid;
+
+  // Log the matrix values.
+  log_info(LD_DIR, "Bin values %x", entry->addr);
+  for (int i = 0; i < control_weight_num_bins; i++)
+    log_info(LD_DIR, "%lf: %lf", control_weight_bin_mids[i], entry->weight_array[i]);
+
   return (uint32_t) max_mid;
 }
 
@@ -1695,9 +1728,9 @@ networkstatus_compute_consensus(smartlist_t *votes,
     tor_assert(valid_after +
                (get_options()->TestingTorNetwork ?
                 MIN_VOTE_INTERVAL_TESTING : MIN_VOTE_INTERVAL) <= fresh_until);
-    tor_assert(fresh_until +
+    /*tor_assert(fresh_until +
                (get_options()->TestingTorNetwork ?
-                MIN_VOTE_INTERVAL_TESTING : MIN_VOTE_INTERVAL) <= valid_until);
+                MIN_VOTE_INTERVAL_TESTING : MIN_VOTE_INTERVAL) <= valid_until);*/
     tor_assert(vote_seconds >= MIN_VOTE_SECONDS);
     tor_assert(dist_seconds >= MIN_DIST_SECONDS);
 
@@ -2255,11 +2288,13 @@ networkstatus_compute_consensus(smartlist_t *votes,
 	  smartlist_insert(mat, relay_idx, entry);
 	}
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
-	uint32_t published_bandwidth = control_weight_compute_published_bandwidth(target_entry, 
-	    rs_out.bandwidth_kb);
+	uint32_t published_bandwidth = control_weight_round_counter > 0 ?
+            control_weight_compute_published_bandwidth(target_entry, rs_out.bandwidth_kb, flavor) :
+            rs_out.bandwidth_kb;
         log_info(LD_DIR, "Exit router: %x.", rs_out.addr);
         log_info(LD_DIR, "Old measured bandwidth: %d.", rs_out.bandwidth_kb);
         log_info(LD_DIR, "New published bandwidth: %d.", published_bandwidth);
+        target_entry->prev_published_bandwidth = published_bandwidth;
 	rs_out.bandwidth_kb = published_bandwidth;
         total_published_bandwidths += (double) published_bandwidth;
       }
@@ -3552,6 +3587,8 @@ dirvote_compute_consensuses(void)
       consensus_body = NULL;
       consensus = NULL;
     }
+    control_weight_round_counter++;
+
     if (!n_generated) {
       log_warn(LD_DIR, "Couldn't generate any consensus flavors at all.");
       goto err;
@@ -4770,6 +4807,7 @@ dirserv_generate_networkstatus_vote_obj(crypto_pk_t *private_key,
                tbuf, current_consensus?1:0, (int)last_consensus_interval);
   }
   v3_out->fresh_until = v3_out->valid_after + timing.vote_interval;
+//  v3_out->valid_until = v3_out->fresh_until;
   v3_out->valid_until = v3_out->valid_after +
     (timing.vote_interval * timing.n_intervals_valid);
   v3_out->vote_seconds = timing.vote_delay;
