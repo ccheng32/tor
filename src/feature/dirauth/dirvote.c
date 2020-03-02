@@ -153,9 +153,10 @@ static int dirvote_publish_consensus(void);
 static int control_weight_num_bins;
 static double* control_weight_bin_mids;
 static smartlist_t* get_control_weight_matrix(void);
-smartlist_t* control_weight_matrix;
+static smartlist_t* control_weight_matrix;
 static int total_num_circ_est;
 static int control_weight_round_counter;
+static int control_enabled;
 
 static 
 int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_member)
@@ -2260,7 +2261,6 @@ networkstatus_compute_consensus(smartlist_t *votes,
         rs_out.has_bandwidth = 1;
         rs_out.bw_is_unmeasured = 0;
         rs_out.bandwidth_kb = median_uint32(measured_bws_kb, num_mbws);
-        log_debug(LD_DIR, "Bandwidth is measured.");
       } else if (num_bandwidths > 0) {
         rs_out.has_bandwidth = 1;
         rs_out.bw_is_unmeasured = 1;
@@ -2271,31 +2271,30 @@ networkstatus_compute_consensus(smartlist_t *votes,
             rs_out.bandwidth_kb = max_unmeasured_bw_kb;
           }
         }
-        log_debug(LD_DIR, "Bandwidth is unmeasured.");
       }
 
       /* Fix bug 2203: Do not count BadExit nodes as Exits for bw weights */
       is_exit = is_exit && !is_bad_exit;
 
       /* Add logic to calculate the best weights for all exit relays. */
-      if (is_exit) {
+      if (is_exit && control_enabled) {
         smartlist_t* mat = get_control_weight_matrix();
-	int relay_idx, found;
-	relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
-	    relay_weight_est_compare_key_to_entry_, &found);
-	if (!found) {
-	  relay_weight_est_t* entry = relay_weight_est_t_new(rs_out.addr);
-	  smartlist_insert(mat, relay_idx, entry);
-	}
+        int relay_idx, found;
+        relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
+            relay_weight_est_compare_key_to_entry_, &found);
+        if (!found) {
+          relay_weight_est_t* entry = relay_weight_est_t_new(rs_out.addr);
+          smartlist_insert(mat, relay_idx, entry);
+        }
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
-	uint32_t published_bandwidth = control_weight_round_counter > 0 ?
+        uint32_t published_bandwidth = control_weight_round_counter > 0 ?
             control_weight_compute_published_bandwidth(target_entry, rs_out.bandwidth_kb, flavor) :
             rs_out.bandwidth_kb;
         log_info(LD_DIR, "Exit router: %x.", rs_out.addr);
         log_info(LD_DIR, "Old measured bandwidth: %d.", rs_out.bandwidth_kb);
         log_info(LD_DIR, "New published bandwidth: %d.", published_bandwidth);
         target_entry->prev_published_bandwidth = published_bandwidth;
-	rs_out.bandwidth_kb = published_bandwidth;
+        rs_out.bandwidth_kb = published_bandwidth;
         total_published_bandwidths += (double) published_bandwidth;
       }
 
@@ -4564,7 +4563,7 @@ smartlist_t* get_control_weight_matrix(void) {
   return control_weight_matrix;
 }
 
-void set_control_weight_num_bins(int min_b, int max_b) {
+void dirvote_set_control_weight_num_bins(int min_b, int max_b) {
   double bounded_min_b = min_b - QUANTIZATION_BASE / 2;
   control_weight_num_bins = (int)ceil(log((double)max_b - bounded_min_b) / log(QUANTIZATION_BASE));
   control_weight_bin_mids = (double*) malloc(sizeof(double) * control_weight_num_bins);
@@ -4580,8 +4579,12 @@ void set_control_weight_num_bins(int min_b, int max_b) {
       control_weight_bin_mids[0], control_weight_bin_mids[control_weight_num_bins - 1]);
 }
 
-void set_total_num_circ_est(int est) {
+void dirvote_set_total_num_circ_est(int est) {
   total_num_circ_est = est;
+}
+
+void dirvote_set_control_enabled(int enabled) {
+  control_enabled = enabled;
 }
 
 /** Space-separated list of all the flags that we will always vote on. */
@@ -4807,7 +4810,6 @@ dirserv_generate_networkstatus_vote_obj(crypto_pk_t *private_key,
                tbuf, current_consensus?1:0, (int)last_consensus_interval);
   }
   v3_out->fresh_until = v3_out->valid_after + timing.vote_interval;
-//  v3_out->valid_until = v3_out->fresh_until;
   v3_out->valid_until = v3_out->valid_after +
     (timing.vote_interval * timing.n_intervals_valid);
   v3_out->vote_seconds = timing.vote_delay;

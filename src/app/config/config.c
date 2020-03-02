@@ -2468,6 +2468,7 @@ static const struct {
   { "--max-relay-bandwidth",  ARGUMENT_OPTIONAL },
   { "--min-relay-bandwidth",  ARGUMENT_OPTIONAL },
   { "--total-num-circ-est",   ARGUMENT_OPTIONAL },
+  { "--use-control",          TAKES_NO_ARGUMENT },
   { "--newpass",              TAKES_NO_ARGUMENT },
   { "--no-passphrase",        TAKES_NO_ARGUMENT },
   { "--passphrase-fd",        ARGUMENT_NECESSARY },
@@ -5330,9 +5331,15 @@ options_init_from_torrc(int argc, char **argv)
     int max_b, min_b, num_circ_est;
     sscanf(max_b_line->value, "%d", &max_b);
     sscanf(min_b_line->value, "%d", &min_b);
-    set_control_weight_num_bins(min_b, max_b);
+    dirvote_set_control_weight_num_bins(min_b, max_b);
     sscanf(circ_est_line->value, "%d", &num_circ_est);
-    set_total_num_circ_est(num_circ_est);
+    dirvote_set_total_num_circ_est(num_circ_est);
+    if (config_line_find(cmdline_only_options, "--use-control")) {
+      // Enable Tor bandwidth control.
+      dirvote_set_control_enabled(1);
+    } else {
+      dirvote_set_control_enabled(0);
+    }
   }
 
   if (config_line_find(cmdline_only_options, "--no-passphrase")) {
