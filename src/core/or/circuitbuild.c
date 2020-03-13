@@ -100,6 +100,8 @@ static const node_t *choose_good_middle_server(uint8_t purpose,
                           crypt_path_t *head,
                           int cur_len);
 
+int establish_flag = 0;
+
 /** This function tries to get a channel to the specified endpoint,
  * and then calls command_setup_channel() to give it the right
  * callbacks.
@@ -494,22 +496,34 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   int err_reason = 0;
   int is_hs_v3_rp_circuit = 0;
 
+  int queue_length = 0;
+  double* bw_queue = (double*) malloc(sizeof(double)*1000);
+  int* idx_queue = (int*) malloc(sizeof(int)*1000);
+
   if (flags & CIRCLAUNCH_IS_V3_RP) {
     is_hs_v3_rp_circuit = 1;
   }
 
   circ = origin_circuit_init(purpose, flags);
-
+  log_debug(LD_CIRC, "established fl %d", establish_flag);
+  if(establish_flag == 0){
+    establish_flag = 1;
   if (onion_pick_cpath_exit(circ, exit_ei, is_hs_v3_rp_circuit) < 0 ||
       onion_populate_cpath(circ) < 0) {
+    if (purpose == CIRCUIT_PURPOSE_C_GENERAL)
+          circuit_add_to_shadow_global_circuit_list(circ);
     circuit_mark_for_close(TO_CIRCUIT(circ), END_CIRC_REASON_NOPATH);
+
     return NULL;
   }
+}
 
+else{
   if (purpose == CIRCUIT_PURPOSE_C_GENERAL){
-    circuit_add_to_shadow_global_circuit_list(circ);
+    log_debug(LD_CIRC, "checkpoint0");
     struct relayInfo* output = (struct relayInfo*) malloc(sizeof(struct relayInfo) * 10000);
     int num = getR(output);  //num is currently used relays
+    log_debug(LD_CIRC, "checkpoint1 %d", num);
 
     smartlist_t* node_list = nodelist_get_list();
     int len = smartlist_len(node_list);
@@ -517,6 +531,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   struct circuit_info *lst = circuit_get_shadow_global_circuit_list();
   const int lst_size = circuit_get_shadow_global_circuit_list_size();
   int relay_num = smartlist_len(node_list);
+  log_debug(LD_CIRC, "checkpoint2 %d", relay_num);
   SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
 
     uint32_t relay_capacity = node->rs->bandwidth_kb;
@@ -549,9 +564,8 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   int cnt = 0;
   double* rat = (double*) malloc(2*sizeof(double) * num);
 
-  double* bw_queue = (double*) malloc(sizeof(double)*1000);
-  int* idx_queue = (int*) malloc(sizeof(int)*1000);
-  int queue_length = 0;
+  log_debug(LD_CIRC, "checkpoint3");
+
   while(1){  //while rres still has things in it
   if(queue_length == num){
     for(int i = 0; i<num; i++){
@@ -665,7 +679,51 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
 
     free(output);
     free(rat);
+
+    int i = 0;
+    log_debug(LD_CIRC, "established fl %d", establish_flag);
+    extend_info_t *info = NULL;
+    for(i = queue_length-3; i< queue_length; i++){
+      int curr_index = idx_queue[i];
+      log_debug(LD_CIRC, "curr index %d", idx_queue[i]);
+      SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
+
+        uint32_t addr_dummy = node->rs->addr;
+        unsigned char bytes[4];
+        char* tmp = (char*)(&addr_dummy);
+        bytes[0] = tmp[3];
+        bytes[1] = tmp[2];
+        bytes[2] = tmp[1];
+        bytes[3] = tmp[0];
+        uint32_t new = *((uint32_t*)bytes);
+
+
+
+          if(new == output[curr_index].addr.addr.dummy_){
+            log_debug(LD_CIRC, "end match %d", node->rs->addr);
+            info = extend_info_from_node(node, 0);
+            log_debug(LD_CIRC,"Chose router %s",
+                      extend_info_describe(info));
+
+            cpath_append_hop(&circ->cpath, info);
+            extend_info_free(info);
+            break;
+          }
+
+      } SMARTLIST_FOREACH_END(node);
+    }
+
   }
+}
+
+
+
+
+
+
+
+
+
 
 
 
