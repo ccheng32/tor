@@ -214,17 +214,23 @@ double husseins_poisson_function(int x_t1, double w_t) {
 
 static 
 double husseins_noisy_poisson_function(int x_t1, int x_t2, double w_t, double obs, double mid) {
-  double ans = 0.0;
+  double l_val_max = -DBL_MAX;
+  double* l_vals = malloc(sizeof(double) * (1 + x_t2 - x_t1));
+
   for (int x_t = x_t1; x_t <= x_t2; x_t++) {
-    double product = 1.0;
-    product *= exp(-total_num_circ_est * w_t);
-    // TODO(ccheng32): Will overflow for larger x_t.
-    product *= exp(-logfac(x_t));
-    product *= pow(total_num_circ_est*w_t, x_t);
-    product *= exp(-(0.5) *pow((obs*(x_t+1) / mid - 1)/0.5, 2));
-    ans += product;
+    double l_val = -total_num_circ_est * w_t - logfac(x_t) + x_t * log(total_num_circ_est * w_t)
+        - 0.5 * pow((obs*(x_t+1)/mid - 1) / 0.05, 2);
+    l_vals[x_t - x_t1] = l_val;
+    l_val_max = fmax(l_val_max, l_val);
   }
-  return log(ans);
+  
+  double ans = 0.0;
+  for (int i = 0; i < x_t2 - x_t1 + 1; i++) {
+    ans += exp(l_vals[i] - l_val_max);
+  }
+  
+  free(l_vals);
+  return l_val_max + log(ans);
 }
 
 static
