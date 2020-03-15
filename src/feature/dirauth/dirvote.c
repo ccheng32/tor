@@ -67,7 +67,7 @@
 // TODO(ccheng32): Pass quantization base in as a cmd line argument.
 #define QUANTIZATION_BASE 1.1
 #define MIN_NOISE 0.6
-#define MAX_NOISE 1.1
+#define MAX_NOISE 1.3
 
 /* Algorithm to use for the bandwidth file digest. */
 #define DIGEST_ALG_BW_FILE DIGEST_SHA256
