@@ -503,8 +503,10 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   }
 
   circ = origin_circuit_init(purpose, flags);
+  or_options_t* or_options = get_options();
 
-  if (purpose != CIRCUIT_PURPOSE_C_GENERAL) {
+  if (purpose != CIRCUIT_PURPOSE_C_GENERAL || or_options->ORPort_set
+		  || flags & CIRCLAUNCH_IS_INTERNAL || flags & CIRCLAUNCH_ONEHOP_TUNNEL) {
     if (onion_pick_cpath_exit(circ, exit_ei, is_hs_v3_rp_circuit) < 0 ||
         onion_populate_cpath(circ) < 0) {
       circuit_mark_for_close(TO_CIRCUIT(circ), END_CIRC_REASON_NOPATH);
