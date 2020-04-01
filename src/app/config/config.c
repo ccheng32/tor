@@ -5334,8 +5334,8 @@ options_init_from_torrc(int argc, char **argv)
     dirvote_set_mle_weight_num_bins(min_b, max_b);
     sscanf(circ_est_line->value, "%d", &num_circ_est);
     dirvote_set_total_num_circ_est(num_circ_est);
-    if (config_line_find(cmdline_only_options, "--use-control")) {
-      // Enable Tor bandwidth control.
+    if (config_line_find(cmdline_only_options, "--use-mle")) {
+      // Enable MLE algorithm.
       dirvote_set_mle_enabled(1);
     } else {
       dirvote_set_mle_enabled(0);
