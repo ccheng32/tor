@@ -150,13 +150,13 @@ static void dirvote_clear_votes(int all_votes);
 static int dirvote_compute_consensuses(void);
 static int dirvote_publish_consensus(void);
 
-static int control_weight_num_bins;
-static double* control_weight_bin_mids;
-static smartlist_t* get_control_weight_matrix(void);
-static smartlist_t* control_weight_matrix;
+static int mle_weight_num_bins;
+static double* mle_weight_bin_mids;
+static smartlist_t* get_mle_weight_matrix(void);
+static smartlist_t* mle_weight_matrix;
 static int total_num_circ_est;
-static int control_weight_round_counter;
-static int control_enabled;
+static int mle_weight_round_counter;
+static int mle_enabled;
 
 static 
 int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_member)
@@ -178,10 +178,10 @@ relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr) {
   res->addr = addr;
   res->prev_weight = 0;
   res->prev_published_bandwidth = 0;
-  res->weight_array = (double*) calloc(control_weight_num_bins, sizeof(double));
+  res->weight_array = (double*) calloc(mle_weight_num_bins, sizeof(double));
   log_info(LD_DIR, "Bin values %x", res->addr);
-  for (int i = 0; i < control_weight_num_bins; i++)
-    log_info(LD_DIR, "%lf: %lf", control_weight_bin_mids[i], res->weight_array[i]);
+  for (int i = 0; i < mle_weight_num_bins; i++)
+    log_info(LD_DIR, "%lf: %lf", mle_weight_bin_mids[i], res->weight_array[i]);
   return res;
 }
 
@@ -234,12 +234,12 @@ double husseins_noisy_poisson_function(int x_t1, int x_t2, double w_t, double ob
 }
 
 static
-uint32_t control_weight_compute_published_bandwidth(
+uint32_t mle_compute_published_bandwidth(
     relay_weight_est_t* entry, uint32_t obs, consensus_flavor_t flavor) {
   if (flavor == 0) {
-    for (int i = 0; i < control_weight_num_bins; i++) {
-      int x_t1 = (int) round(MIN_NOISE * control_weight_bin_mids[i] / obs - 1.0);
-      int x_t2 = (int) round(MAX_NOISE * control_weight_bin_mids[i] / obs - 1.0);
+    for (int i = 0; i < mle_weight_num_bins; i++) {
+      int x_t1 = (int) round(MIN_NOISE * mle_weight_bin_mids[i] / obs - 1.0);
+      int x_t2 = (int) round(MAX_NOISE * mle_weight_bin_mids[i] / obs - 1.0);
       if (x_t1 < 0) x_t1 = 0;
       if (x_t2 < 0 || x_t1 > total_num_circ_est) {
         entry->weight_array[i] = -DBL_MAX;
@@ -248,23 +248,23 @@ uint32_t control_weight_compute_published_bandwidth(
       if (x_t1 > total_num_circ_est ) x_t1 = total_num_circ_est;
       if (entry->weight_array[i] > -DBL_MAX)
          entry->weight_array[i] += husseins_noisy_poisson_function(x_t1, x_t2,
-             entry->prev_weight, obs, control_weight_bin_mids[i]);
+             entry->prev_weight, obs, mle_weight_bin_mids[i]);
     }
   }
 
   // Find the maximum entry.
   double max_mid = 0.0, max_array_entry = -DBL_MAX;
-  for (int i = 0; i < control_weight_num_bins; i++) {
+  for (int i = 0; i < mle_weight_num_bins; i++) {
     if (entry->weight_array[i] > max_array_entry) {
       max_array_entry = entry->weight_array[i];
-      max_mid = control_weight_bin_mids[i];
+      max_mid = mle_weight_bin_mids[i];
     }
   }
 
   // Log the matrix values.
   log_info(LD_DIR, "Bin values %x", entry->addr);
-  for (int i = 0; i < control_weight_num_bins; i++)
-    log_info(LD_DIR, "%lf: %lf", control_weight_bin_mids[i], entry->weight_array[i]);
+  for (int i = 0; i < mle_weight_num_bins; i++)
+    log_info(LD_DIR, "%lf: %lf", mle_weight_bin_mids[i], entry->weight_array[i]);
 
   return (uint32_t) max_mid;
 }
@@ -2283,8 +2283,8 @@ networkstatus_compute_consensus(smartlist_t *votes,
       is_exit = is_exit && !is_bad_exit;
 
       /* Add logic to calculate the best weights for all exit relays. */
-      if (is_exit && control_enabled) {
-        smartlist_t* mat = get_control_weight_matrix();
+      if (is_exit && mle_enabled) {
+        smartlist_t* mat = get_mle_weight_matrix();
         int relay_idx, found;
         relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
             relay_weight_est_compare_key_to_entry_, &found);
@@ -2293,8 +2293,8 @@ networkstatus_compute_consensus(smartlist_t *votes,
           smartlist_insert(mat, relay_idx, entry);
         }
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
-        uint32_t published_bandwidth = control_weight_round_counter > 0 ?
-            control_weight_compute_published_bandwidth(target_entry, rs_out.bandwidth_kb, flavor) :
+        uint32_t published_bandwidth = mle_weight_round_counter > 0 ?
+            mle_compute_published_bandwidth(target_entry, rs_out.bandwidth_kb, flavor) :
             rs_out.bandwidth_kb;
         log_info(LD_DIR, "Exit router: %x.", rs_out.addr);
         log_info(LD_DIR, "Old measured bandwidth: %d.", rs_out.bandwidth_kb);
@@ -2303,6 +2303,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
         rs_out.bandwidth_kb = published_bandwidth;
         total_published_bandwidths += (double) published_bandwidth;
       }
+      log_info(LD_DIR, "Published bandwidth %s=%d", rs_out.nickname, rs_out.bandwidth_kb);
 
       /* Update total bandwidth weights with the bandwidths of this router. */
       {
@@ -2458,7 +2459,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
 
     // Normalize the weights with the total published bandwidth.
     // TODO(ccheng32): Handle situation where relays come and go (inactive).
-    smartlist_t* final_mat = get_control_weight_matrix();
+    smartlist_t* final_mat = get_mle_weight_matrix();
     SMARTLIST_FOREACH_BEGIN(final_mat, relay_weight_est_t*, rwe) {
       rwe->prev_weight = (double) rwe->prev_published_bandwidth / total_published_bandwidths;
     } SMARTLIST_FOREACH_END(rwe);
@@ -3592,7 +3593,7 @@ dirvote_compute_consensuses(void)
       consensus_body = NULL;
       consensus = NULL;
     }
-    control_weight_round_counter++;
+    mle_weight_round_counter++;
 
     if (!n_generated) {
       log_warn(LD_DIR, "Couldn't generate any consensus flavors at all.");
@@ -4563,34 +4564,34 @@ clear_status_flags_on_sybil(routerstatus_t *rs)
 }
 
 static
-smartlist_t* get_control_weight_matrix(void) {
-  if (control_weight_matrix == NULL)
-    control_weight_matrix = smartlist_new();
-  return control_weight_matrix;
+smartlist_t* get_mle_weight_matrix(void) {
+  if (mle_weight_matrix == NULL)
+    mle_weight_matrix = smartlist_new();
+  return mle_weight_matrix;
 }
 
-void dirvote_set_control_weight_num_bins(int min_b, int max_b) {
+void dirvote_set_mle_weight_num_bins(int min_b, int max_b) {
   double bounded_min_b = min_b - QUANTIZATION_BASE / 2;
-  control_weight_num_bins = (int)ceil(log((double)max_b - bounded_min_b) / log(QUANTIZATION_BASE));
-  control_weight_bin_mids = (double*) malloc(sizeof(double) * control_weight_num_bins);
+  mle_weight_num_bins = (int)ceil(log((double)max_b - bounded_min_b) / log(QUANTIZATION_BASE));
+  mle_weight_bin_mids = (double*) malloc(sizeof(double) * mle_weight_num_bins);
   double base = 1.0, curr = (double) bounded_min_b, next;
-  for (int i = 0; i < control_weight_num_bins; i++) {
+  for (int i = 0; i < mle_weight_num_bins; i++) {
     base *= QUANTIZATION_BASE;
     next = bounded_min_b + base;
-    control_weight_bin_mids[i] = (curr + next) / 2.0;
-    log_info(LD_DIR, "Mid %d: %lf", i, control_weight_bin_mids[i]);
+    mle_weight_bin_mids[i] = (curr + next) / 2.0;
+    log_info(LD_DIR, "Mid %d: %lf", i, mle_weight_bin_mids[i]);
     curr = next;
   }
-  log_info(LD_DIR, "Created %d bins with min %lf and Max %lf.", control_weight_num_bins,
-      control_weight_bin_mids[0], control_weight_bin_mids[control_weight_num_bins - 1]);
+  log_info(LD_DIR, "Created %d bins with min %lf and Max %lf.", mle_weight_num_bins,
+      mle_weight_bin_mids[0], mle_weight_bin_mids[mle_weight_num_bins - 1]);
 }
 
 void dirvote_set_total_num_circ_est(int est) {
   total_num_circ_est = est;
 }
 
-void dirvote_set_control_enabled(int enabled) {
-  control_enabled = enabled;
+void dirvote_set_mle_enabled(int enabled) {
+  mle_enabled = enabled;
 }
 
 /** Space-separated list of all the flags that we will always vote on. */
