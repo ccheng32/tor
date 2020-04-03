@@ -100,8 +100,6 @@ static const node_t *choose_good_middle_server(uint8_t purpose,
                           crypt_path_t *head,
                           int cur_len);
 
- int establish_flag = 0;
-
 /** This function tries to get a channel to the specified endpoint,
  * and then calls command_setup_channel() to give it the right
  * callbacks.
@@ -509,34 +507,16 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
 
 
   if (purpose != CIRCUIT_PURPOSE_C_GENERAL || or_options->ORPort_set
-		  || flags & CIRCLAUNCH_IS_INTERNAL != 0 || flags & CIRCLAUNCH_ONEHOP_TUNNEL) {
-        log_debug(LD_CIRC, "wss");
-        log_debug(LD_CIRC, "flag1 %d", or_options->ORPort_set);
-        log_debug(LD_CIRC, "flag2 %d", flags & CIRCLAUNCH_IS_INTERNAL);
-        log_debug(LD_CIRC, "flag3 %d", flags & CIRCLAUNCH_ONEHOP_TUNNEL);
+		  || flags & CIRCLAUNCH_IS_INTERNAL != 0 || flags & CIRCLAUNCH_ONEHOP_TUNNEL
+		  || control_event_bootstrap_status() < BOOTSTRAP_STATUS_DONE) {
+    log_debug(LD_CIRC, "Original circuit building method.");
     if (onion_pick_cpath_exit(circ, exit_ei, is_hs_v3_rp_circuit) < 0 ||
         onion_populate_cpath(circ) < 0) {
       circuit_mark_for_close(TO_CIRCUIT(circ), END_CIRC_REASON_NOPATH);
       return NULL;
     }
-
-  }
-else if(establish_flag == 0){
-  log_debug(LD_CIRC, "sss");
-  establish_flag = 1;
-  if (onion_pick_cpath_exit(circ, exit_ei, is_hs_v3_rp_circuit) < 0 ||
-      onion_populate_cpath(circ) < 0) {
-    circuit_mark_for_close(TO_CIRCUIT(circ), END_CIRC_REASON_NOPATH);
-    return NULL;
-  }
-  circuit_add_to_shadow_global_circuit_list(circ);
-  struct relayInfo* output = (struct relayInfo*) malloc(sizeof(struct relayInfo) * 10000);
-  int num = getR(output);  //num is currently used relays
-  log_debug(LD_CIRC, "nottoday %d", num);
-
-}
-  else { // Run custom TR algorithm to create a new general circuit.
-    log_debug(LD_CIRC, "bss");
+  } else { // Run custom TR algorithm to create a new general circuit.
+    log_debug(LD_CIRC, "Tightrope circuit building method.");
     log_debug(LD_CIRC, "checkpoint0");
 
     struct relayInfo* output = (struct relayInfo*) malloc(sizeof(struct relayInfo) * 10000);
@@ -551,185 +531,184 @@ else if(establish_flag == 0){
     int relay_num = smartlist_len(node_list);
     log_debug(LD_CIRC, "checkpoint2 %d", relay_num);
     SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
+      uint32_t relay_capacity = node->rs->bandwidth_kb;
+      log_debug(LD_CIRC, "Relay has ip dummy %d.", node->rs->addr);
+      int flag = 0;
+      uint32_t addr_dummy = node->rs->addr;
+      unsigned char bytes[4];
+      char* tmp = (char*)(&addr_dummy);
+      bytes[0] = tmp[3];
+      bytes[1] = tmp[2];
+      bytes[2] = tmp[1];
+      bytes[3] = tmp[0];
+      uint32_t new = *((uint32_t*)bytes);
 
-    uint32_t relay_capacity = node->rs->bandwidth_kb;
-    log_debug(LD_CIRC, "Relay has ip dummy %d.", node->rs->addr);
-    int flag = 0;
-    uint32_t addr_dummy = node->rs->addr;
-    unsigned char bytes[4];
-    char* tmp = (char*)(&addr_dummy);
-    bytes[0] = tmp[3];
-    bytes[1] = tmp[2];
-    bytes[2] = tmp[1];
-    bytes[3] = tmp[0];
-    uint32_t new = *((uint32_t*)bytes);
+      for(int i = 0; i < num; i++){
 
-    for(int i = 0; i < num; i++){
-
-      if(new == output[i].addr.addr.dummy_){
-        flag = 1;
-        log_debug(LD_CIRC, "match %d", node->rs->addr);
-        output[i].relay_capacity = node->rs->bandwidth_kb;
-      }
-    }
-    log_debug(LD_CIRC, "Relay has bandwidth capacity %d.", relay_capacity);
-    if(flag == 0){
-      log_debug(LD_CIRC, "Current relay unused.");
-//todo, add logic when actually adding relays
-    }
-    } SMARTLIST_FOREACH_END(node);
-
-  int cnt = 0;
-  double* rat = (double*) malloc(2*sizeof(double) * num);
-
-  log_debug(LD_CIRC, "checkpoint3");
-
-  while(1){  //while rres still has things in it
-  if(queue_length == num){
-    for(int i = 0; i<num; i++){
-      log_debug(LD_CIRC, "queue result %d.", idx_queue[i]);
-    }
-    break;
-  }
-  cnt+=1;
-  log_debug(LD_CIRC, "iteration number %d.", cnt);
-  if(cnt == 2000){
-    break;
-  }
-
-  for(int i = 0; i < num; i++){
-    log_debug(LD_CIRC, "init circuitnum %d.", output[i].circuitNum);
-
-  }
-
-  for(int i = 0; i < num; i++){
-    if(output[i].circuitNum > 0)
-      rat[i] = (double)output[i].relay_capacity / (double)output[i].circuitNum;
-    else
-      rat[i] = 10000;
-
-
-    int idxflag = 0;
-    for(int j = 0; j<queue_length; j++){
-      if(idx_queue[j] == i){
-        idxflag = 1;  //i is in B already
-      }
-    }
-    if(idxflag == 0)
-      rat[i+num] = (double)output[i].relay_capacity / (double)(output[i].circuitNum+1);
-    else
-      rat[i+num] = 10000;
-
-
-  }
-  double minimum = 9999;
-  int idx = 0;
-  for(int i = 0; i < 2*num; i++){
-    if(rat[i] < minimum){
-      idx = i;
-      minimum = rat[i];
-    }
-  }
-
-  log_debug(LD_CIRC, "minimum value %f.", minimum);
-  log_debug(LD_CIRC, "minimum idx %d.", idx);
-
-  if(minimum == 9999){
-    break;
-  }
-
-  if(idx > num-1){   //second row
-    idx_queue[queue_length] = idx-num;
-    bw_queue[queue_length] = minimum;
-    queue_length+=1;
-
-    log_debug(LD_CIRC, "queue length %d.", queue_length);
-    log_debug(LD_CIRC, "relay num %d.", idx - num);
-  }
-  else{ //first row
-    int* m_mark = (int*) malloc(sizeof(int) * num);
-
-    memset(m_mark, 0, num);
-    for(int k = 0; k<output[idx].circuitNum; k++){  //for all circuit in this relay
-      int circuit_idx = output[idx].circuits[k];  //current circuit idx
-      for (int p = 0; p < lst_size; p++) {
-        if(lst[p].index == circuit_idx){
-          for(int q = 0; q < 3; q++){  //for all three relays of tis current circuit
-
-
-
-            for(int m = 0; m < num; m++){
-              if(lst[p].relays[q].addr.dummy_ == output[m].addr.addr.dummy_ && m_mark[m] != 1){
-                m_mark[m] = 1;
-
-                output[m].relay_capacity -= minimum;
-                for(int r = 0; r<output[m].circuitNum; r++){
-                  if(output[m].circuits[r] == circuit_idx){
-                    output[m].circuits[r] = output[m].circuits[output[m].circuitNum-1];
-                  }
-
-                }
-                output[m].circuitNum-=1;
-              }
-            }
-
-          }
+        if(new == output[i].addr.addr.dummy_){
+          flag = 1;
+          log_debug(LD_CIRC, "match %d", node->rs->addr);
+          output[i].relay_capacity = node->rs->bandwidth_kb;
         }
       }
-    }
+      log_debug(LD_CIRC, "Relay has bandwidth capacity %d.", relay_capacity);
+      if(flag == 0){
+        log_debug(LD_CIRC, "Current relay unused.");
+        //todo, add logic when actually adding relays
+      }
+    } SMARTLIST_FOREACH_END(node);
 
-  }
+    int cnt = 0;
+    double* rat = (double*) malloc(2*sizeof(double) * num);
 
-  int finishflag = 1;
-  for(int i = 0; i < num; i++){     //check at last whether all circuit num is 0
-    if(output[i].circuitNum != 0){
-      finishflag = 0;
+    log_debug(LD_CIRC, "checkpoint3");
+
+    while(1) {  //while rres still has things in it
+      if(queue_length == num){
+        for(int i = 0; i<num; i++){
+          log_debug(LD_CIRC, "queue result %d.", idx_queue[i]);
+        }
+        break;
+      }
+      cnt+=1;
+      log_debug(LD_CIRC, "iteration number %d.", cnt);
+      if(cnt == 2000){
+        break;
+      }
+
+      for(int i = 0; i < num; i++){
+        log_debug(LD_CIRC, "init circuitnum %d.", output[i].circuitNum);
+
+      }
+
+      for(int i = 0; i < num; i++){
+        if(output[i].circuitNum > 0)
+          rat[i] = (double)output[i].relay_capacity / (double)output[i].circuitNum;
+        else
+          rat[i] = 10000;
+
+
+        int idxflag = 0;
+        for(int j = 0; j<queue_length; j++){
+          if(idx_queue[j] == i){
+            idxflag = 1;  //i is in B already
+          }
+        }
+        if(idxflag == 0)
+          rat[i+num] = (double)output[i].relay_capacity / (double)(output[i].circuitNum+1);
+        else
+          rat[i+num] = 10000;
+
+
+      }
+      double minimum = 9999;
+      int idx = 0;
+      for(int i = 0; i < 2*num; i++){
+        if(rat[i] < minimum){
+          idx = i;
+          minimum = rat[i];
+        }
+      }
+
+      log_debug(LD_CIRC, "minimum value %f.", minimum);
+      log_debug(LD_CIRC, "minimum idx %d.", idx);
+
+      if(minimum == 9999){
+        break;
+      }
+
+      if(idx > num-1){   //second row
+        idx_queue[queue_length] = idx-num;
+        bw_queue[queue_length] = minimum;
+        queue_length+=1;
+
+        log_debug(LD_CIRC, "queue length %d.", queue_length);
+        log_debug(LD_CIRC, "relay num %d.", idx - num);
+      }
+      else{ //first row
+        int* m_mark = (int*) malloc(sizeof(int) * num);
+
+        memset(m_mark, 0, num);
+        for(int k = 0; k<output[idx].circuitNum; k++){  //for all circuit in this relay
+          int circuit_idx = output[idx].circuits[k];  //current circuit idx
+          for (int p = 0; p < lst_size; p++) {
+            if(lst[p].index == circuit_idx){
+              for(int q = 0; q < 3; q++){  //for all three relays of tis current circuit
+
+
+
+                for(int m = 0; m < num; m++){
+                  if(lst[p].relays[q].addr.dummy_ == output[m].addr.addr.dummy_ && m_mark[m] != 1){
+                    m_mark[m] = 1;
+
+                    output[m].relay_capacity -= minimum;
+                    for(int r = 0; r<output[m].circuitNum; r++){
+                      if(output[m].circuits[r] == circuit_idx){
+                        output[m].circuits[r] = output[m].circuits[output[m].circuitNum-1];
+                      }
+
+                    }
+                    output[m].circuitNum-=1;
+                  }
+                }
+
+              }
+            }
+          }
+        }
+
+      }
+
+      int finishflag = 1;
+      for(int i = 0; i < num; i++){     //check at last whether all circuit num is 0
+        if(output[i].circuitNum != 0){
+          finishflag = 0;
+          break;
+        }
+      }
+      if(finishflag == 0){
+        continue;
+      }
+      log_debug(LD_CIRC, "done.");
       break;
     }
-  }
-  if(finishflag == 0){
-    continue;
-  }
-  log_debug(LD_CIRC, "done.");
-  break;
-  }
 
 
 
 
-    int i = 0;
-    extend_info_t *info = NULL;
-    for(i = queue_length-3; i< queue_length; i++){
-      int curr_index = idx_queue[i];
-      log_debug(LD_CIRC, "curr index %d", idx_queue[i]);
-      SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
-        uint32_t addr_dummy = node->rs->addr;
-        unsigned char bytes[4];
-        char* tmp = (char*)(&addr_dummy);
-        bytes[0] = tmp[3];
-        bytes[1] = tmp[2];
-        bytes[2] = tmp[1];
-        bytes[3] = tmp[0];
-        uint32_t new = *((uint32_t*)bytes);
+      int i = 0;
+      extend_info_t *info = NULL;
+      for(i = queue_length-3; i< queue_length; i++){
+        int curr_index = idx_queue[i];
+        log_debug(LD_CIRC, "curr index %d", idx_queue[i]);
+        SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
+          uint32_t addr_dummy = node->rs->addr;
+          unsigned char bytes[4];
+          char* tmp = (char*)(&addr_dummy);
+          bytes[0] = tmp[3];
+          bytes[1] = tmp[2];
+          bytes[2] = tmp[1];
+          bytes[3] = tmp[0];
+          uint32_t new = *((uint32_t*)bytes);
 
 
 
-          if(new == output[curr_index].addr.addr.dummy_){
-            log_debug(LD_CIRC, "end match %d", node->rs->addr);
-            info = extend_info_from_node(node, 0);
-            log_debug(LD_CIRC,"Chose router %s",
-                      extend_info_describe(info));
+            if(new == output[curr_index].addr.addr.dummy_){
+              log_debug(LD_CIRC, "end match %d", node->rs->addr);
+              info = extend_info_from_node(node, 0);
+              log_debug(LD_CIRC,"Chose router %s",
+                        extend_info_describe(info));
 
-            cpath_append_hop(&circ->cpath, info);
-            extend_info_free(info);
-            break;
-          }
+              cpath_append_hop(&circ->cpath, info);
+              extend_info_free(info);
+              break;
+            }
 
 
-      } SMARTLIST_FOREACH_END(node);
+        } SMARTLIST_FOREACH_END(node);
 
-  }
-  circuit_add_to_shadow_global_circuit_list(circ);
+    }
+    circuit_add_to_shadow_global_circuit_list(circ);
   } // End custom TR algorithm.
 
   circuit_event_status(circ, CIRC_EVENT_LAUNCHED, 0);

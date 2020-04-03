@@ -381,3 +381,10 @@ control_event_bootstrap_reset(void)
   bootstrap_dir_phase = BOOTSTRAP_STATUS_UNDEF;
   memset(last_sent_bootstrap_message, 0, sizeof(last_sent_bootstrap_message));
 }
+
+/** Return the current bootstrapping status. **/
+int
+control_event_bootstrap_status(void)
+{
+  return bootstrap_percent;
+}

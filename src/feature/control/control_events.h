@@ -172,6 +172,7 @@ void control_event_bootstrap_problem(const char *warn, const char *reason,
                                      const connection_t *conn, int dowarn);
 char *control_event_boot_last_msg(void);
 void control_event_bootstrap_reset(void);
+int control_event_bootstrap_status(void);
 
 void control_event_clients_seen(const char *controller_str);
 void control_event_transport_launched(const char *mode,
