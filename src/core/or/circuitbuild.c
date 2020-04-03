@@ -100,6 +100,8 @@ static const node_t *choose_good_middle_server(uint8_t purpose,
                           crypt_path_t *head,
                           int cur_len);
 
+ int establish_flag = 0;
+
 /** This function tries to get a channel to the specified endpoint,
  * and then calls command_setup_channel() to give it the right
  * callbacks.
@@ -505,15 +507,38 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   circ = origin_circuit_init(purpose, flags);
   or_options_t* or_options = get_options();
 
-  if (purpose != CIRCUIT_PURPOSE_C_GENERAL || or_options->ORPort_set
-		  || flags & CIRCLAUNCH_IS_INTERNAL || flags & CIRCLAUNCH_ONEHOP_TUNNEL) {
+
+  if (purpose != CIRCUIT_PURPOSE_C_GENERAL
+		  || flags & CIRCLAUNCH_IS_INTERNAL != 0 || flags & CIRCLAUNCH_ONEHOP_TUNNEL) {
+        log_debug(LD_CIRC, "wss");
+        log_debug(LD_CIRC, "flag1 %d", or_options->ORPort_set);
+        log_debug(LD_CIRC, "flag2 %d", flags & CIRCLAUNCH_IS_INTERNAL);
+        log_debug(LD_CIRC, "flag3 %d", flags & CIRCLAUNCH_ONEHOP_TUNNEL);
     if (onion_pick_cpath_exit(circ, exit_ei, is_hs_v3_rp_circuit) < 0 ||
         onion_populate_cpath(circ) < 0) {
       circuit_mark_for_close(TO_CIRCUIT(circ), END_CIRC_REASON_NOPATH);
       return NULL;
     }
-  } else { // Run custom TR algorithm to create a new general circuit.
+    circuit_add_to_shadow_global_circuit_list(circ);
+  }
+else if(establish_flag == 0){
+  log_debug(LD_CIRC, "sss");
+  establish_flag = 1;
+  if (onion_pick_cpath_exit(circ, exit_ei, is_hs_v3_rp_circuit) < 0 ||
+      onion_populate_cpath(circ) < 0) {
+    circuit_mark_for_close(TO_CIRCUIT(circ), END_CIRC_REASON_NOPATH);
+    return NULL;
+  }
+  circuit_add_to_shadow_global_circuit_list(circ);
+  struct relayInfo* output = (struct relayInfo*) malloc(sizeof(struct relayInfo) * 10000);
+  int num = getR(output);  //num is currently used relays
+  log_debug(LD_CIRC, "nottoday %d", num);
+
+}
+  else { // Run custom TR algorithm to create a new general circuit.
+    log_debug(LD_CIRC, "bss");
     log_debug(LD_CIRC, "checkpoint0");
+
     struct relayInfo* output = (struct relayInfo*) malloc(sizeof(struct relayInfo) * 10000);
     int num = getR(output);  //num is currently used relays
     log_debug(LD_CIRC, "checkpoint1 %d", num);
@@ -670,8 +695,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   }
 
 
-    free(output);
-    free(rat);
+
 
     int i = 0;
     extend_info_t *info = NULL;
@@ -679,7 +703,6 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
       int curr_index = idx_queue[i];
       log_debug(LD_CIRC, "curr index %d", idx_queue[i]);
       SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
-
         uint32_t addr_dummy = node->rs->addr;
         unsigned char bytes[4];
         char* tmp = (char*)(&addr_dummy);
@@ -702,7 +725,9 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
             break;
           }
 
+
       } SMARTLIST_FOREACH_END(node);
+
   }
   } // End custom TR algorithm.
 
