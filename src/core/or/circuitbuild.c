@@ -508,7 +508,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   or_options_t* or_options = get_options();
 
 
-  if (purpose != CIRCUIT_PURPOSE_C_GENERAL
+  if (purpose != CIRCUIT_PURPOSE_C_GENERAL || or_options->ORPort_set
 		  || flags & CIRCLAUNCH_IS_INTERNAL != 0 || flags & CIRCLAUNCH_ONEHOP_TUNNEL) {
         log_debug(LD_CIRC, "wss");
         log_debug(LD_CIRC, "flag1 %d", or_options->ORPort_set);
