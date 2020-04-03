@@ -519,7 +519,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
       circuit_mark_for_close(TO_CIRCUIT(circ), END_CIRC_REASON_NOPATH);
       return NULL;
     }
-    circuit_add_to_shadow_global_circuit_list(circ);
+
   }
 else if(establish_flag == 0){
   log_debug(LD_CIRC, "sss");
@@ -729,6 +729,7 @@ else if(establish_flag == 0){
       } SMARTLIST_FOREACH_END(node);
 
   }
+  circuit_add_to_shadow_global_circuit_list(circ);
   } // End custom TR algorithm.
 
   circuit_event_status(circ, CIRC_EVENT_LAUNCHED, 0);
