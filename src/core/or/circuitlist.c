@@ -743,6 +743,12 @@ compare_addr_to_relay_info(const void *_key, const void **_member)
   else return 0;
 }
 
+relay_info_t*
+get_relay_info_by_addr(smartlist_t* r_list, uint32_t addr)
+{
+  return (relay_info_t*) smartlist_bsearch(r_list, &addr, compare_addr_to_relay_info);
+}
+
 smartlist_t* getR(void)
 {
   const circuit_info_t *lst = circuit_get_shadow_global_circuit_list();
@@ -755,7 +761,7 @@ smartlist_t* getR(void)
     relay_info_t* r_info = (relay_info_t*) malloc(sizeof(relay_info_t));
     r_info->addr = node->rs->addr;
     r_info->capacity = node->rs->bandwidth_kb;
-    r_info->circuit_indices = smartlist_new();
+    r_info->circ_infos = smartlist_new();
     smartlist_add(r_list, r_info);
   } SMARTLIST_FOREACH_END(node);
 
@@ -766,10 +772,8 @@ smartlist_t* getR(void)
   for (int i = 0; i < lst_size; i++) {
     for (int j = 0; j < 3; j++) {
       uint32_t addr = lst[i].relay_addrs[j];
-      relay_info_t* r_info = (relay_info_t*) smartlist_bsearch(r_list, &addr, compare_addr_to_relay_info);
-      int* index = (int*) malloc(sizeof(int));
-      *index = lst[i].index;
-      smartlist_add(r_info->circuit_indices, index);
+      relay_info_t* r_info = get_relay_info_by_addr(r_list, addr);
+      smartlist_add(r_info->circ_infos, &(lst[i]));
     }
   }
 
@@ -778,10 +782,7 @@ smartlist_t* getR(void)
 
 void freeR(smartlist_t* r_list) {
   SMARTLIST_FOREACH_BEGIN(r_list, relay_info_t*, r_info) {
-    SMARTLIST_FOREACH_BEGIN(r_info->circuit_indices, int*, index) {
-      free(index);
-    } SMARTLIST_FOREACH_END(index);
-    smartlist_free(r_info->circuit_indices);
+    smartlist_free(r_info->circ_infos);
     free(r_info);
   } SMARTLIST_FOREACH_END(r_info);
   smartlist_free(r_list);

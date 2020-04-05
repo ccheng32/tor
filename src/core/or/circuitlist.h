@@ -26,7 +26,7 @@ typedef struct relay_info
 {
    uint32_t addr;
    uint32_t capacity;
-   smartlist_t* circuit_indices;
+   smartlist_t* circ_infos;
 } relay_info_t;
 
 
@@ -214,6 +214,7 @@ int32_t circuit_initial_package_window(void);
 origin_circuit_t *origin_circuit_new(void);
 
 void circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ);
+relay_info_t* get_relay_info_by_addr(smartlist_t* r_list, uint32_t addr);
 smartlist_t* getR(void);
 void freeR(smartlist_t* r_list);
 

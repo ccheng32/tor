@@ -575,7 +575,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
       left_bw[i] = (double) node->rs->bandwidth_kb; 
 
       const relay_info_t* r_info = smartlist_get(r_list, i);
-      const int num_circs = smartlist_len(r_info->circuit_indices);
+      const int num_circs = smartlist_len(r_info->circ_infos);
       bw_array[i].band = num_circs == 0 ? INFINITY : left_bw[i] / num_circs;
       bw_array[i].is_normal = 1;
       bw_array[i].relay_addr = r_info->addr;
@@ -595,7 +595,9 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     // Start TR algorithm while loop.
     while (smartlist_len(visrel) > 0) {
       bw_type_t* bw_type = (bw_type_t*) smartlist_pqueue_pop(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index));
-      if (bw_type->is_normal == 0) {
+      if(!bw_type) break;
+
+      if (bw_type->is_normal == 0) { // Append to B list;
 	void* node = smartlist_bsearch(visrel, &(bw_type->relay_addr), compare_addr_to_node);
 	if (node) {
 	  smartlist_add(b_list, node);
@@ -603,6 +605,11 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
 	} else {
           log_notice(LD_CIRC, "IP addr not found in visrel.");
 	}
+      } else { // Update new bandwidth for other relays;
+        relay_info_t* r_info = get_relay_info_by_addr(r_list, bw_type->relay_addr);
+	smartlist_t* updated;
+	SMARTLIST_FOREACH_BEGIN(r_info->circ_infos, const circuit_info_t*, circ_info) {
+	} SMARTLIST_FOREACH_END(circ_info);
       }
     }
 
