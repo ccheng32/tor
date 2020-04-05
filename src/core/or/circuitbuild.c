@@ -107,6 +107,7 @@ typedef struct bw_type
   double band;
   int is_normal; // False: 0, True: non-zero
   uint32_t relay_addr;
+  int heap_index;
 } bw_type_t;
 
 /** This function tries to get a channel to the specified endpoint,
@@ -479,7 +480,7 @@ origin_circuit_init(uint8_t purpose, int flags)
 
 static void print_capacities(void) {
   // Compile a list of relay capacities C.
-  smartlist_t* node_list = nodelist_get_list();
+  const smartlist_t* node_list = nodelist_get_list();
   int len = smartlist_len(node_list);
   log_debug(LD_CIRC, "Node list length is %d.", len);
   SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
@@ -499,6 +500,26 @@ compare_node_by_addr(const void **a, const void **b)
   else return 0;
 }
 
+static int
+compare_addr_to_node(const void *key, const void **member)
+{
+  const uint32_t addr = *((uint32_t*) key);
+  const node_t *n = *member;
+  if (addr < n->rs->addr) return -1;
+  else if (addr > n->rs->addr) return 1;
+  else return 0;
+}
+
+static int
+compare_bw_type_by_band(const void *a, const void *b)
+{
+  const bw_type_t *b1 = a;
+  const bw_type_t *b2 = b;
+  if (b1->band < b2->band) return -1;
+  else if (b1->band > b2->band) return 1;
+  else return 0;
+}
+
 /** Build a new circuit for <b>purpose</b>. If <b>exit</b>
  * is defined, then use that as your exit router, else choose a suitable
  * exit node.
@@ -513,20 +534,16 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   int err_reason = 0;
   int is_hs_v3_rp_circuit = 0;
 
-  int queue_length = 0;
-  double* bw_queue = (double*) malloc(sizeof(double)*1000);
-  int* idx_queue = (int*) malloc(sizeof(int)*1000);
-
   if (flags & CIRCLAUNCH_IS_V3_RP) {
     is_hs_v3_rp_circuit = 1;
   }
 
   circ = origin_circuit_init(purpose, flags);
-  or_options_t* or_options = get_options();
+  const or_options_t* or_options = get_options();
 
 
   if (purpose != CIRCUIT_PURPOSE_C_GENERAL || or_options->ORPort_set
-		  || flags & CIRCLAUNCH_IS_INTERNAL != 0 || flags & CIRCLAUNCH_ONEHOP_TUNNEL
+		  || (flags & CIRCLAUNCH_IS_INTERNAL) || (flags & CIRCLAUNCH_ONEHOP_TUNNEL)
 		  || control_event_bootstrap_status() < BOOTSTRAP_STATUS_DONE) {
     log_debug(LD_CIRC, "Original circuit building method.");
     if (onion_pick_cpath_exit(circ, exit_ei, is_hs_v3_rp_circuit) < 0 ||
@@ -549,6 +566,10 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     double* left_bw = (double*) malloc(sizeof(double)*num_nodes);
     bw_type_t* bw_array = (bw_type_t*) malloc(sizeof(bw_type_t) * num_nodes);
     bw_type_t* bw_array2 = (bw_type_t*) malloc(sizeof(bw_type_t) * num_nodes);
+    bw_type_t* bw_array_copy = (bw_type_t*) malloc(sizeof(bw_type_t) * num_nodes);
+    bw_type_t* bw_array2_copy = (bw_type_t*) malloc(sizeof(bw_type_t) * num_nodes);
+    // bw_list stores bw types from both bw_arrays, sorted by band in each item.
+    smartlist_t* bw_list = smartlist_new();
     for ( int i = 0; i < num_nodes; i++) {
       node_t* node = (node_t*) smartlist_get(visrel, i);
       left_bw[i] = (double) node->rs->bandwidth_kb; 
@@ -561,6 +582,28 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
       bw_array2[i].band = left_bw[i] / (1+num_circs);
       bw_array2[i].is_normal = 0;
       bw_array2[i].relay_addr = r_info->addr;
+
+      // Add to the sorted list.
+      bw_array_copy[i] = bw_array[i];
+      bw_array2_copy[i] = bw_array2[i];
+      if(num_circs > 0)
+        smartlist_pqueue_add(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index), &(bw_array_copy[i]));
+      smartlist_pqueue_add(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index), &(bw_array2_copy[i]));
+    }
+
+    smartlist_t* b_list;
+    // Start TR algorithm while loop.
+    while (smartlist_len(visrel) > 0) {
+      bw_type_t* bw_type = (bw_type_t*) smartlist_pqueue_pop(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index));
+      if (bw_type->is_normal == 0) {
+	void* node = smartlist_bsearch(visrel, &(bw_type->relay_addr), compare_addr_to_node);
+	if (node) {
+	  smartlist_add(b_list, node);
+	  smartlist_remove_keeporder(visrel, node);
+	} else {
+          log_notice(LD_CIRC, "IP addr not found in visrel.");
+	}
+      }
     }
 
     circuit_add_to_shadow_global_circuit_list(circ);
@@ -568,8 +611,13 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     free(left_bw);
     free(bw_array);
     free(bw_array2);
-    smartlist_free(r_list);
+    free(bw_array_copy);
+    free(bw_array2_copy);
+
+    freeR(r_list);
     smartlist_free(visrel);
+    smartlist_free(bw_list);
+    smartlist_free(b_list);
   } // End custom TR algorithm.
 
   circuit_event_status(circ, CIRC_EVENT_LAUNCHED, 0);

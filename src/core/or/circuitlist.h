@@ -215,6 +215,7 @@ origin_circuit_t *origin_circuit_new(void);
 
 void circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ);
 smartlist_t* getR(void);
+void freeR(smartlist_t* r_list);
 
 or_circuit_t *or_circuit_new(circid_t p_circ_id, channel_t *p_chan);
 circuit_t *circuit_get_by_circid_channel(circid_t circ_id,

@@ -767,11 +767,24 @@ smartlist_t* getR(void)
     for (int j = 0; j < 3; j++) {
       uint32_t addr = lst[i].relay_addrs[j];
       relay_info_t* r_info = (relay_info_t*) smartlist_bsearch(r_list, &addr, compare_addr_to_relay_info);
-      smartlist_add(r_info->circuit_indices, lst[i].index);
+      int* index = (int*) malloc(sizeof(int));
+      *index = lst[i].index;
+      smartlist_add(r_info->circuit_indices, index);
     }
   }
 
   return r_list;
+}
+
+void freeR(smartlist_t* r_list) {
+  SMARTLIST_FOREACH_BEGIN(r_list, relay_info_t*, r_info) {
+    SMARTLIST_FOREACH_BEGIN(r_info->circuit_indices, int*, index) {
+      free(index);
+    } SMARTLIST_FOREACH_END(index);
+    smartlist_free(r_info->circuit_indices);
+    free(r_info);
+  } SMARTLIST_FOREACH_END(r_info);
+  smartlist_free(r_list);
 }
 
 /** BALANCE: Similar to circuit_add_to_origin_circuit_list, but adds to globally
