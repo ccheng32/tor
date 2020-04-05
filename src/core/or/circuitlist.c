@@ -109,6 +109,8 @@
 #include "core/or/cpath_build_state_st.h"
 #include "core/or/crypt_path_reference_st.h"
 #include "feature/dircommon/dir_connection_st.h"
+#include "feature/nodelist/routerstatus_st.h"
+#include "feature/nodelist/node_st.h"
 #include "core/or/edge_connection_st.h"
 #include "core/or/half_edge_st.h"
 #include "core/or/extend_info_st.h"
@@ -652,14 +654,14 @@ circuit_add_to_origin_circuit_list(origin_circuit_t *origin_circ)
   origin_circ->global_origin_circuit_list_idx = smartlist_len(lst) - 1;
 }
 
-struct circuit_info*
+circuit_info_t*
 circuit_get_shadow_global_circuit_list(void)
 {
   // This if statement probably never executes
   // the list should have been allocated in shadow
   // design choice?
   if (NULL == *shadow_global_circuit_list) {
-    *shadow_global_circuit_list = (struct circuit_info*) malloc(sizeof(struct circuit_info) * SHADOW_MAX_SHARED_CIRCUITS);
+    *shadow_global_circuit_list = (circuit_info_t*) malloc(sizeof(circuit_info_t) * SHADOW_MAX_SHARED_CIRCUITS);
     log_warn(LD_BUG, "BALANCE: Shared list in shadow is not initialized.");
   }
   return *shadow_global_circuit_list;
@@ -721,31 +723,55 @@ static void print_ip(uint32_t ip)
     log_debug(LD_CIRC, "%d.%d.%d.%d", bytes[0], bytes[1], bytes[2], bytes[3]);
 }
 
-int getR(struct relayInfo* output){
-  struct circuit_info *lst = circuit_get_shadow_global_circuit_list();
-  const int lst_size = circuit_get_shadow_global_circuit_list_size();
-  int relayNum = 0;
+static int
+compare_relay_info(const void **a, const void **b)
+{
+  const relay_info_t *r1 = *a;
+  const relay_info_t *r2 = *b;
+  if (r1->addr < r2->addr) return -1;
+  else if (r1->addr > r2->addr) return 1;
+  else return 0;
+}
 
+static int
+compare_addr_to_relay_info(const void *_key, const void **_member)
+{
+  const uint32_t addr = *(uint32_t *)_key;
+  const relay_info_t *r_info = *_member;
+  if (addr < r_info->addr) return -1;
+  else if (addr > r_info->addr) return 1;
+  else return 0;
+}
+
+smartlist_t* getR(void)
+{
+  const circuit_info_t *lst = circuit_get_shadow_global_circuit_list();
+  const int lst_size = circuit_get_shadow_global_circuit_list_size();
+  const smartlist_t* node_list = nodelist_get_list();
+  smartlist_t* r_list = smartlist_new();
+
+  // Each entry in r_list contains basic relay info. IP addr and weight.
+  SMARTLIST_FOREACH_BEGIN(node_list, const node_t *, node) {
+    relay_info_t* r_info = (relay_info_t*) malloc(sizeof(relay_info_t));
+    r_info->addr = node->rs->addr;
+    r_info->capacity = node->rs->bandwidth_kb;
+    r_info->circuit_indices = smartlist_new();
+    smartlist_add(r_list, r_info);
+  } SMARTLIST_FOREACH_END(node);
+
+  // Sort r_list by the ip address.
+  smartlist_sort(r_list, compare_relay_info);
+
+  // Populate circuit information for each relay.
   for (int i = 0; i < lst_size; i++) {
-    for(int k = 0; k < 3; k++) {
-      int relay_match = 0;
-      for(int j = 0; j< relayNum; j++){  //check if there is already  a relayinfo for this ip
-        if(output[j].addr.addr.dummy_ == lst[i].relays[k].addr.dummy_){  //match found
-          output[j].circuits[output[j].circuitNum] = lst[i].index;
-          output[j].circuitNum+=1;
-	  relay_match = 1;
-	  break;
-        }
-      }
-      if (relay_match == 0) { //no existing match
-          output[relayNum].circuitNum = 1;
-          output[relayNum].circuits[0] = lst[i].index;
-          output[relayNum].addr = lst[i].relays[k];
-          relayNum += 1;
-      }
+    for (int j = 0; j < 3; j++) {
+      uint32_t addr = lst[i].relay_addrs[j];
+      relay_info_t* r_info = (relay_info_t*) smartlist_bsearch(r_list, &addr, compare_addr_to_relay_info);
+      smartlist_add(r_info->circuit_indices, lst[i].index);
     }
   }
-  return relayNum;
+
+  return r_list;
 }
 
 /** BALANCE: Similar to circuit_add_to_origin_circuit_list, but adds to globally
@@ -756,19 +782,19 @@ circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ)
 {
   pthread_mutex_lock(shadow_global_circuit_list_lock);
   tor_assert(origin_circ->shadow_global_circuit_list_idx == -1);
-  struct circuit_info *lst = circuit_get_shadow_global_circuit_list();
+  circuit_info_t *lst = circuit_get_shadow_global_circuit_list();
   const int lst_size = circuit_get_shadow_global_circuit_list_size();
   for (int i = 0; i < lst_size; i++) {
-    struct circuit_info currCircuit = lst[i];
+    circuit_info_t currCircuit = lst[i];
     log_debug(LD_CIRC, "Hello circ %d:", currCircuit.index);
-    print_ip(currCircuit.relays[0].addr.dummy_);
-    print_ip(currCircuit.relays[1].addr.dummy_);
-    print_ip(currCircuit.relays[2].addr.dummy_);
+    print_ip(currCircuit.relay_addrs[0]);
+    print_ip(currCircuit.relay_addrs[1]);
+    print_ip(currCircuit.relay_addrs[2]);
   }
   crypt_path_t* cpath = origin_circ->cpath;
   lst[lst_size].index = lst_size;
   for (int i = 0; i < 3; i++) {
-    lst[lst_size].relays[i] = cpath->extend_info->addr;
+    lst[lst_size].relay_addrs[i] = cpath->extend_info->addr.addr.dummy_;
     cpath = cpath->next;
   }
   origin_circ->shadow_global_circuit_list_idx = lst_size;

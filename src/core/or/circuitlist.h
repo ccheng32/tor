@@ -18,21 +18,20 @@
 
 typedef struct circuit_info
 {
-   tor_addr_t relays[3];
+   uint32_t relay_addrs[3];
    int index;
 } circuit_info_t;
 
-typedef struct relayInfo
+typedef struct relay_info
 {
-   tor_addr_t addr;
-   int circuits[10000];
-   int circuitNum;
-   uint32_t relay_capacity;
-} relayInfo_t;
+   uint32_t addr;
+   uint32_t capacity;
+   smartlist_t* circuit_indices;
+} relay_info_t;
 
 
 
-struct circuit_info **shadow_global_circuit_list;
+circuit_info_t **shadow_global_circuit_list;
 int *shadow_global_circuit_list_counter;
 pthread_mutex_t *shadow_global_circuit_list_lock;
 
@@ -215,7 +214,7 @@ int32_t circuit_initial_package_window(void);
 origin_circuit_t *origin_circuit_new(void);
 
 void circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ);
-int getR(struct relayInfo*output);
+smartlist_t* getR(void);
 
 or_circuit_t *or_circuit_new(circid_t p_circ_id, channel_t *p_chan);
 circuit_t *circuit_get_by_circid_channel(circid_t circ_id,
@@ -266,7 +265,7 @@ MOCK_DECL(void, channel_note_destroy_not_pending,
 
 smartlist_t *circuit_find_circuits_to_upgrade_from_guard_wait(void);
 
-struct circuit_info*
+circuit_info_t*
 circuit_get_shadow_global_circuit_list(void);
 
 int
