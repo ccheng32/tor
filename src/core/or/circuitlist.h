@@ -213,7 +213,7 @@ void circuit_close_all_marked(void);
 int32_t circuit_initial_package_window(void);
 origin_circuit_t *origin_circuit_new(void);
 
-void circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ);
+void circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ, node_t** nodes);
 relay_info_t* get_relay_info_by_addr(smartlist_t* r_list, uint32_t addr);
 smartlist_t* getR(void);
 void freeR(smartlist_t* r_list);

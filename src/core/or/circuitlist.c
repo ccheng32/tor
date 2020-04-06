@@ -713,16 +713,6 @@ circuit_close_all_marked(void)
   smartlist_clear(circuits_pending_close);
 }
 
-static void print_ip(uint32_t ip)
-{
-    unsigned char bytes[4];
-    bytes[0] = ip & 0xFF;
-    bytes[1] = (ip >> 8) & 0xFF;
-    bytes[2] = (ip >> 16) & 0xFF;
-    bytes[3] = (ip >> 24) & 0xFF;
-    log_debug(LD_CIRC, "%d.%d.%d.%d", bytes[0], bytes[1], bytes[2], bytes[3]);
-}
-
 static int
 compare_relay_info(const void **a, const void **b)
 {
@@ -751,6 +741,7 @@ get_relay_info_by_addr(smartlist_t* r_list, uint32_t addr)
 
 smartlist_t* getR(void)
 {
+  log_debug(LD_CIRC, "Start generating R list.");
   const circuit_info_t *lst = circuit_get_shadow_global_circuit_list();
   const int lst_size = circuit_get_shadow_global_circuit_list_size();
   const smartlist_t* node_list = nodelist_get_list();
@@ -768,15 +759,18 @@ smartlist_t* getR(void)
   // Sort r_list by the ip address.
   smartlist_sort(r_list, compare_relay_info);
 
+  log_debug(LD_CIRC, "%d circuits to add to R list.", lst_size);
   // Populate circuit information for each relay.
   for (int i = 0; i < lst_size; i++) {
     for (int j = 0; j < 3; j++) {
       uint32_t addr = lst[i].relay_addrs[j];
       relay_info_t* r_info = get_relay_info_by_addr(r_list, addr);
-      smartlist_add(r_info->circ_infos, &(lst[i]));
+      if (r_info) smartlist_add(r_info->circ_infos, &(lst[i]));
+      else log_warn(LD_CIRC, "Addr not found in r_list.");
     }
   }
 
+  log_debug(LD_CIRC, "End generating R list.");
   return r_list;
 }
 
@@ -792,24 +786,16 @@ void freeR(smartlist_t* r_list) {
  *  shared circuit list maintained by Shadow. Router info must be filled out already in
  *  origin_circ.*/
 void
-circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ)
+circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ, node_t** nodes)
 {
   pthread_mutex_lock(shadow_global_circuit_list_lock);
   tor_assert(origin_circ->shadow_global_circuit_list_idx == -1);
   circuit_info_t *lst = circuit_get_shadow_global_circuit_list();
   const int lst_size = circuit_get_shadow_global_circuit_list_size();
-  for (int i = 0; i < lst_size; i++) {
-    circuit_info_t currCircuit = lst[i];
-    log_debug(LD_CIRC, "Hello circ %d:", currCircuit.index);
-    print_ip(currCircuit.relay_addrs[0]);
-    print_ip(currCircuit.relay_addrs[1]);
-    print_ip(currCircuit.relay_addrs[2]);
-  }
-  crypt_path_t* cpath = origin_circ->cpath;
+
   lst[lst_size].index = lst_size;
   for (int i = 0; i < 3; i++) {
-    lst[lst_size].relay_addrs[i] = cpath->extend_info->addr.addr.dummy_;
-    cpath = cpath->next;
+    lst[lst_size].relay_addrs[i] = nodes[i]->rs->addr;
   }
   origin_circ->shadow_global_circuit_list_idx = lst_size;
   circuit_increment_shadow_global_circuit_list_size();

@@ -549,7 +549,8 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     const int num_nodes = smartlist_len(node_list);
 
     // visrel contains a copy of the node list sorted by the ip addr.
-    smartlist_t* sorted_node_list;
+    smartlist_t* sorted_node_list = smartlist_new();
+    smartlist_add_all(sorted_node_list, node_list);
     smartlist_sort(sorted_node_list, compare_node_by_addr);
     smartlist_t* visrel = smartlist_new();
     smartlist_add_all(visrel, sorted_node_list);
@@ -580,8 +581,9 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
       smartlist_pqueue_add(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index), &(bw_array2[i]));
     }
 
-    smartlist_t* b_list;
+    smartlist_t* b_list = smartlist_new();
     // Start TR algorithm while loop.
+    log_debug(LD_CIRC, "Start main TR while loop.");
     while (smartlist_len(visrel) > 0) {
       bw_type_t* bw_type = (bw_type_t*) smartlist_pqueue_pop(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index));
       if(!bw_type) break;
@@ -592,7 +594,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
           smartlist_add(b_list, node);
           smartlist_remove_keeporder(visrel, node);
         } else {
-          log_notice(LD_CIRC, "IP addr not found in visrel.");
+          log_warn(LD_CIRC, "IP addr not found in visrel.");
         }
       } else { // Update new bandwidth for other relays;
         smartlist_t* updated = smartlist_new();
@@ -605,7 +607,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
               int found;
               int idx = smartlist_bsearch_idx(sorted_node_list, &addr, compare_addr_to_node, &found);
               if (found) left_bw[idx] -= bw_type->band;
-              else log_notice(LD_CIRC, "IP addr not found in sorted node list.");
+              else log_warn(LD_CIRC, "IP addr not found in sorted node list.");
               relay_info_t* r_other_2_info = get_relay_info_by_addr(r_list, addr);
               smartlist_remove_keeporder(r_other_2_info->circ_infos, circ_info);
             }
@@ -615,13 +617,13 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
         int found;
         int idx = smartlist_bsearch_idx(sorted_node_list, &(bw_type->relay_addr), compare_addr_to_node, &found);
         if (found) left_bw[idx]  = 0.0;
-        else log_notice(LD_CIRC, "IP addr not found in sorted node list.");
+        else log_warn(LD_CIRC, "IP addr not found in sorted node list.");
         
         SMARTLIST_FOREACH_BEGIN(updated, const uint32_t*, ur) {
           int ur_found;
           int ur_idx = smartlist_bsearch_idx(sorted_node_list, ur, compare_addr_to_node, &ur_found);
           if (!ur_found) {
-            log_notice(LD_CIRC, "IP addr not found in sorted node list.");
+            log_warn(LD_CIRC, "IP addr not found in sorted node list.");
             continue;
           }
           smartlist_pqueue_remove(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index), &(bw_array[ur_idx]));
@@ -638,16 +640,19 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
         smartlist_free(updated);
       }
     }
+    log_debug(LD_CIRC, "End main TR while loop.");
 
     int b_list_len = smartlist_len(b_list); 
+    node_t* final_nodes[3];
     for (int i = 0; i < 3; i++) {
       node_t* node = (node_t*) smartlist_get(b_list, b_list_len - 3 + i);
       extend_info_t* info = extend_info_from_node(node, 0);
       cpath_append_hop(&circ->cpath, info);
       extend_info_free(info);
+      final_nodes[i] = node;
     }
 
-    circuit_add_to_shadow_global_circuit_list(circ);
+    circuit_add_to_shadow_global_circuit_list(circ, final_nodes);
 
     free(left_bw);
     free(bw_array);
@@ -658,6 +663,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     smartlist_free(sorted_node_list);
     smartlist_free(bw_list);
     smartlist_free(b_list);
+    log_debug(LD_CIRC, "Tightrope circuit building method end.");
   } // End custom TR algorithm.
 
   circuit_event_status(circ, CIRC_EVENT_LAUNCHED, 0);
