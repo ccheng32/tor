@@ -626,14 +626,14 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
           }
           smartlist_pqueue_remove(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index), &(bw_array[ur_idx]));
           relay_info_t* ur_info = get_relay_info_by_addr(r_list, *ur);
-	  int ur_num_circs = smartlist_len(ur_info->circ_infos);
-	  if ( ur_num_circs > 0) {
-	    bw_array[ur_idx].band = left_bw[ur_idx] / ur_num_circs; 
+          int ur_num_circs = smartlist_len(ur_info->circ_infos);
+          if ( ur_num_circs > 0) {
+            bw_array[ur_idx].band = left_bw[ur_idx] / ur_num_circs; 
             smartlist_pqueue_add(bw_list, compare_bw_type_by_band, offsetof(bw_type_t, heap_index), &(bw_array[ur_idx]));
-	  }
-	  if (smartlist_bsearch(visrel, ur, compare_addr_to_node)) {
-	    bw_array2[ur_idx].band = left_bw[ur_idx] / (1+ur_num_circs);
-	  }
+          }
+          if (smartlist_bsearch(visrel, ur, compare_addr_to_node)) {
+            bw_array2[ur_idx].band = left_bw[ur_idx] / (1+ur_num_circs);
+          }
         } SMARTLIST_FOREACH_END(ur);
         smartlist_free(updated);
       }
