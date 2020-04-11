@@ -104,6 +104,7 @@ extern const char DIRVOTE_OPTIONAL_FLAGS[];
 void dirvote_set_mle_weight_num_bins(int min_b, int max_b);
 void dirvote_set_total_num_circ_est(int est);
 void dirvote_set_mle_enabled(int enabled);
+void dirvote_set_mle_all_relays(int enabled);
 
 /*
  * Public API. Used outside of the dirauth subsystem.

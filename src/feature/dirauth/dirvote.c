@@ -157,6 +157,7 @@ static smartlist_t* mle_weight_matrix;
 static int total_num_circ_est;
 static int mle_weight_round_counter;
 static int mle_enabled;
+static int mle_all_relays;
 
 static 
 int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_member)
@@ -2283,7 +2284,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
       is_exit = is_exit && !is_bad_exit;
 
       /* Add logic to calculate the best weights for all exit relays. */
-      if (is_exit && mle_enabled) {
+      if (mle_enabled && (is_exit || mle_all_relays)) {
         smartlist_t* mat = get_mle_weight_matrix();
         int relay_idx, found;
         relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
@@ -2296,7 +2297,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
         uint32_t published_bandwidth = mle_weight_round_counter > 0 ?
             mle_compute_published_bandwidth(target_entry, rs_out.bandwidth_kb, flavor) :
             rs_out.bandwidth_kb;
-        log_info(LD_DIR, "Exit router: %x.", rs_out.addr);
+        log_info(LD_DIR, "Target router: %x.", rs_out.addr);
         log_info(LD_DIR, "Old measured bandwidth: %d.", rs_out.bandwidth_kb);
         log_info(LD_DIR, "New published bandwidth: %d.", published_bandwidth);
         target_entry->prev_published_bandwidth = published_bandwidth;
@@ -4592,6 +4593,10 @@ void dirvote_set_total_num_circ_est(int est) {
 
 void dirvote_set_mle_enabled(int enabled) {
   mle_enabled = enabled;
+}
+
+void dirvote_set_mle_all_relays(int enabled) {
+  mle_all_relays = enabled;
 }
 
 /** Space-separated list of all the flags that we will always vote on. */

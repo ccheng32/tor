@@ -2468,7 +2468,8 @@ static const struct {
   { "--max-relay-bandwidth",  ARGUMENT_OPTIONAL },
   { "--min-relay-bandwidth",  ARGUMENT_OPTIONAL },
   { "--total-num-circ-est",   ARGUMENT_OPTIONAL },
-  { "--use-mle",          TAKES_NO_ARGUMENT },
+  { "--use-mle",              TAKES_NO_ARGUMENT },
+  { "--use-mle-all-relays",   TAKES_NO_ARGUMENT },
   { "--newpass",              TAKES_NO_ARGUMENT },
   { "--no-passphrase",        TAKES_NO_ARGUMENT },
   { "--passphrase-fd",        ARGUMENT_NECESSARY },
@@ -5339,6 +5340,12 @@ options_init_from_torrc(int argc, char **argv)
       dirvote_set_mle_enabled(1);
     } else {
       dirvote_set_mle_enabled(0);
+    }
+    if (config_line_find(cmdline_only_options, "--use-mle-all-relays")) {
+      // Enable MLE for all relays.
+      dirvote_set_mle_all_relays(1);
+    } else {
+      dirvote_set_mle_all_relays(0);
     }
   }
 
