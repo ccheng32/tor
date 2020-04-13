@@ -174,10 +174,10 @@ int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_membe
 }
 
 static 
-relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr) {
+relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr, const double init_weight) {
   relay_weight_est_t* res = (relay_weight_est_t*) malloc(sizeof(relay_weight_est_t));
   res->addr = addr;
-  res->prev_weight = 0;
+  res->prev_weight = init_weight;
   res->prev_published_bandwidth = 0;
   res->weight_array = (double*) calloc(mle_weight_num_bins, sizeof(double));
   log_info(LD_DIR, "Bin values %x", res->addr);
@@ -2290,7 +2290,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
         relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
             relay_weight_est_compare_key_to_entry_, &found);
         if (!found) {
-          relay_weight_est_t* entry = relay_weight_est_t_new(rs_out.addr);
+          relay_weight_est_t* entry = relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers);
           smartlist_insert(mat, relay_idx, entry);
         }
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
