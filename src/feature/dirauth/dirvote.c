@@ -2284,7 +2284,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
       is_exit = is_exit && !is_bad_exit;
 
       /* Add logic to calculate the best weights for all exit relays. */
-      if (mle_enabled && (is_exit || mle_all_relays)) {
+      if (rs_out.bandwidth_kb > 0 && mle_enabled && (is_exit || mle_all_relays)) {
         smartlist_t* mat = get_mle_weight_matrix();
         int relay_idx, found;
         relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
