@@ -1085,7 +1085,7 @@ circuit_stream_is_being_handled(entry_connection_t *conn,
 }
 
 /** Don't keep more than this many unused open circuits around. */
-#define MAX_UNUSED_OPEN_CIRCUITS 14
+#define MAX_UNUSED_OPEN_CIRCUITS 1
 
 /* Return true if a circuit is available for use, meaning that it is open,
  * clean, usable for new multi-hop connections, and a general purpose origin
