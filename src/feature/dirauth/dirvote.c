@@ -124,6 +124,7 @@ typedef struct pending_consensus_t {
 typedef struct relay_weight_est {
   uint32_t addr; /**< IPv4 address for this router, in host order. */
   double prev_weight;
+  double* group_total_weight;
   uint32_t prev_published_bandwidth;
   // TODO(ccheng32): Add a flag here to specify whether the relay is
   // active in this round.
@@ -2056,6 +2057,9 @@ networkstatus_compute_consensus(smartlist_t *votes,
     flag_counts = tor_calloc(smartlist_len(flags), sizeof(int));
     const int num_routers = dircollator_n_routers(collator);
     double total_published_bandwidths = 0.0;
+    double exit_published_bandwidths = 0.0;
+    double guard_published_bandwidths = 0.0;
+    double mid_guard_published_bandwidths = 0.0;
     for (i = 0; i < num_routers; ++i) {
       vote_routerstatus_t **vrs_lst =
         dircollator_get_votes_for_router(collator, i);
@@ -2303,6 +2307,17 @@ networkstatus_compute_consensus(smartlist_t *votes,
         target_entry->prev_published_bandwidth = published_bandwidth;
         rs_out.bandwidth_kb = published_bandwidth;
         total_published_bandwidths += (double) published_bandwidth;
+	if (is_exit) {
+          exit_published_bandwidths += (double) published_bandwidth;
+          target_entry->group_total_weight = &exit_published_bandwidths;
+        } else {
+          mid_guard_published_bandwidths += (double) published_bandwidth;
+          target_entry->group_total_weight = &mid_guard_published_bandwidths;
+          if (is_guard) {
+            guard_published_bandwidths += (double) published_bandwidth;
+            target_entry->group_total_weight = &guard_published_bandwidths;
+          }
+        }
       }
       log_info(LD_DIR, "Published bandwidth %s=%d", rs_out.nickname, rs_out.bandwidth_kb);
 
@@ -2462,7 +2477,7 @@ networkstatus_compute_consensus(smartlist_t *votes,
     // TODO(ccheng32): Handle situation where relays come and go (inactive).
     smartlist_t* final_mat = get_mle_weight_matrix();
     SMARTLIST_FOREACH_BEGIN(final_mat, relay_weight_est_t*, rwe) {
-      rwe->prev_weight = (double) rwe->prev_published_bandwidth / total_published_bandwidths;
+      rwe->prev_weight = (double) rwe->prev_published_bandwidth / *(rwe->group_total_weight);
     } SMARTLIST_FOREACH_END(rwe);
 
     tor_free(size);
