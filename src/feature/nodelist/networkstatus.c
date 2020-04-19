@@ -174,6 +174,8 @@ static int have_warned_about_old_version = 0;
  * listed by the authorities. */
 static int have_warned_about_new_version = 0;
 
+static int delayed_consensus;
+
 static void update_consensus_bootstrap_multiple_downloads(
                                                   time_t now,
                                                   const or_options_t *options);
@@ -184,6 +186,11 @@ static int reload_consensus_from_file(const char *fname,
                                       const char *flavor,
                                       unsigned flags,
                                       const char *source_dir);
+
+void
+networkstatus_set_delayed_consensus(int x) {
+  delayed_consensus = x;
+}
 
 /** Forget that we've warned about anything networkstatus-related, so we will
  * give fresh warnings if the same behavior happens again. */
@@ -1197,7 +1204,7 @@ update_consensus_networkstatus_fetch_time_impl(time_t now, int flav)
     /* catch late start in crazy-fast networks */
     if (start+dl_interval >= c->valid_until)
       start = c->valid_until - dl_interval - 1;
-    log_debug(LD_DIR,
+    log_info(LD_DIR,
               "fresh_until: %ld start: %ld "
               "dl_interval: %ld valid_until: %ld ",
               (long)c->fresh_until, (long)start, dl_interval,
@@ -1206,9 +1213,12 @@ update_consensus_networkstatus_fetch_time_impl(time_t now, int flav)
     tor_assert(c->fresh_until < start);
     /* We must download the next one before c is invalid: */
     tor_assert(start+dl_interval < c->valid_until);
-    time_to_download_next_consensus[flav] =
-      //start + crypto_rand_int((int)dl_interval);
-      c->fresh_until + 3;
+    if (delayed_consensus) 
+      time_to_download_next_consensus[flav] =
+          c->fresh_until + crypto_rand_int(c->valid_until - c->fresh_until);
+    else
+      time_to_download_next_consensus[flav] =
+          c->fresh_until + 3;
     {
       char tbuf1[ISO_TIME_LEN+1];
       char tbuf2[ISO_TIME_LEN+1];

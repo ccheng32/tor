@@ -2470,6 +2470,7 @@ static const struct {
   { "--total-num-circ-est",   ARGUMENT_OPTIONAL },
   { "--use-mle",              TAKES_NO_ARGUMENT },
   { "--use-mle-all-relays",   TAKES_NO_ARGUMENT },
+  { "--use-delayed-consensus",TAKES_NO_ARGUMENT },
   { "--newpass",              TAKES_NO_ARGUMENT },
   { "--no-passphrase",        TAKES_NO_ARGUMENT },
   { "--passphrase-fd",        ARGUMENT_NECESSARY },
@@ -5347,6 +5348,12 @@ options_init_from_torrc(int argc, char **argv)
     } else {
       dirvote_set_mle_all_relays(0);
     }
+  }
+
+  if (config_line_find(cmdline_only_options, "--use-delayed-consensus")) {
+    networkstatus_set_delayed_consensus(1);
+  } else {
+    networkstatus_set_delayed_consensus(0);
   }
 
   if (config_line_find(cmdline_only_options, "--no-passphrase")) {

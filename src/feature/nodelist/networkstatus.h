@@ -14,6 +14,7 @@
 
 #include "lib/testsupport/testsupport.h"
 
+void networkstatus_set_delayed_consensus(int x);
 void networkstatus_reset_warnings(void);
 void networkstatus_reset_download_failures(void);
 tor_mmap_t *networkstatus_map_cached_consensus(const char *flavorname);
