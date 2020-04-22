@@ -651,7 +651,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
       cpath_append_hop(&circ->cpath, info);
       extend_info_free(info);
       final_nodes[i] = node;
-      if (i == 2) circ->build_state->chosen_exit = exit_ei;
+      if (i == 2) circ->build_state->chosen_exit = info;
     }
 
     circuit_add_to_shadow_global_circuit_list(circ, final_nodes);
