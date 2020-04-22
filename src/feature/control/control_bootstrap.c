@@ -174,7 +174,7 @@ control_event_bootstrap_core(int loglevel, bootstrap_status_t status,
   control_event_client_status(LOG_NOTICE, "%s", buf);
 
   // Close all circuits not created by Tightrope.
-  if (!get_options()->ORPort_set && progress == 100) {
+  if (!get_options()->ORPort_set && status >= 100) {
     tor_log(loglevel, LD_CONTROL, "Bootstrap done. Ending all previous circuits.");
     smartlist_t* c_list = circuit_get_global_origin_circuit_list();
     SMARTLIST_FOREACH_BEGIN(c_list, origin_circuit_t*, circ) {
