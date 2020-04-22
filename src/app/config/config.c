@@ -2470,6 +2470,7 @@ static const struct {
   { "--list-fingerprint",     TAKES_NO_ARGUMENT },
   { "--keygen",               TAKES_NO_ARGUMENT },
   { "--key-expiration",       ARGUMENT_OPTIONAL },
+  { "--use-tightrope",        TAKES_NO_ARGUMENT },
   { "--newpass",              TAKES_NO_ARGUMENT },
   { "--no-passphrase",        TAKES_NO_ARGUMENT },
   { "--passphrase-fd",        ARGUMENT_NECESSARY },
@@ -5344,6 +5345,12 @@ options_init_from_torrc(int argc, char **argv)
 
   if (retval < 0)
     goto err;
+
+  if (config_line_find(cmdline_only_options, "--use-tightrope")) {
+    circuit_enable_tightrope(1);
+  } else {
+    circuit_enable_tightrope(0);
+  }
 
   if (config_line_find(cmdline_only_options, "--no-passphrase")) {
     if (command == CMD_KEYGEN) {

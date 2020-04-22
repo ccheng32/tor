@@ -102,6 +102,8 @@ static const node_t *choose_good_middle_server(uint8_t purpose,
                           crypt_path_t *head,
                           int cur_len);
 
+static int tightrope_enabled;
+
 typedef struct bw_type
 {
   double band;
@@ -534,7 +536,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
   const or_options_t* or_options = get_options();
 
 
-  if (purpose != CIRCUIT_PURPOSE_C_GENERAL || or_options->ORPort_set ||
+  if (purpose != CIRCUIT_PURPOSE_C_GENERAL || or_options->ORPort_set || !tightrope_enabled ||
                  (flags & CIRCLAUNCH_IS_INTERNAL) || (flags & CIRCLAUNCH_ONEHOP_TUNNEL) ||
                  control_event_bootstrap_status() < BOOTSTRAP_STATUS_DONE) {
     log_debug(LD_CIRC, "Original circuit building method.");
@@ -3125,4 +3127,10 @@ circuit_upgrade_circuits_from_guard_wait(void)
   } SMARTLIST_FOREACH_END(circ);
 
   smartlist_free(to_upgrade);
+}
+
+void
+circuit_enable_tightrope(int enabled)
+{
+  tightrope_enabled = enabled;
 }
