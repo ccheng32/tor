@@ -547,6 +547,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     log_debug(LD_CIRC, "Tightrope circuit building method.");
     const smartlist_t* node_list = nodelist_get_list();
     const int num_nodes = smartlist_len(node_list);
+    circ->build_state->desired_path_len = 3;
 
     // visrel contains a copy of the node list sorted by the ip addr.
     smartlist_t* sorted_node_list = smartlist_new();
@@ -650,6 +651,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
       cpath_append_hop(&circ->cpath, info);
       extend_info_free(info);
       final_nodes[i] = node;
+      if (i == 2) circ->build_state->chosen_exit = exit_ei;
     }
 
     circuit_add_to_shadow_global_circuit_list(circ, final_nodes);
