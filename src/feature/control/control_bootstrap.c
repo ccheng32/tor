@@ -10,9 +10,12 @@
 
 #include "app/config/config.h"
 #include "core/mainloop/connection.h"
+#include "core/or/circuituse.h"
+#include "core/or/circuitlist.h"
 #include "core/or/connection_or.h"
 #include "core/or/connection_st.h"
 #include "core/or/or_connection_st.h"
+#include "core/or/origin_circuit_st.h"
 #include "core/or/reasons.h"
 #include "feature/control/control_events.h"
 #include "feature/hibernate/hibernate.h"
@@ -169,6 +172,16 @@ control_event_bootstrap_core(int loglevel, bootstrap_status_t status,
                sizeof(last_sent_bootstrap_message),
                "NOTICE %s", buf);
   control_event_client_status(LOG_NOTICE, "%s", buf);
+
+  // Close all circuits not created by Tightrope.
+  if (!get_options()->ORPort_set && progress == 100) {
+    tor_log(loglevel, LD_CONTROL, "Bootstrap done. Ending all previous circuits.");
+    smartlist_t* c_list = circuit_get_global_origin_circuit_list();
+    SMARTLIST_FOREACH_BEGIN(c_list, origin_circuit_t*, circ) {
+      if (circ->shadow_global_circuit_list_idx == -1)
+        mark_circuit_unusable_for_new_conns(circ);
+    } SMARTLIST_FOREACH_END(circ);
+  }
 }
 
 /** Called when Tor has made progress at bootstrapping its directory
