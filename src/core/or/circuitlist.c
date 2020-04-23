@@ -788,7 +788,6 @@ void freeR(smartlist_t* r_list) {
 void
 circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ, node_t** nodes)
 {
-  pthread_mutex_lock(shadow_global_circuit_list_lock);
   tor_assert(origin_circ->shadow_global_circuit_list_idx == -1);
   circuit_info_t *lst = circuit_get_shadow_global_circuit_list();
   const int lst_size = circuit_get_shadow_global_circuit_list_size();
@@ -799,7 +798,6 @@ circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ, node_t*
   }
   origin_circ->shadow_global_circuit_list_idx = lst_size;
   circuit_increment_shadow_global_circuit_list_size();
-  pthread_mutex_unlock(shadow_global_circuit_list_lock);
 }
 
 /** Return a pointer to the global list of circuits. */
