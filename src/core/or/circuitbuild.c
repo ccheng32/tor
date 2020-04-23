@@ -547,7 +547,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     }
   } else { // Run custom TR algorithm to create a new general circuit.
     log_info(LD_CIRC, "Tightrope circuit building method.");
-    pthread_mutex_lock(shadow_global_circuit_list_lock);
+    circuit_shadow_global_circuit_list_lock();
     const smartlist_t* node_list = nodelist_get_list();
     const int num_nodes = smartlist_len(node_list);
     circ->build_state->desired_path_len = 3;
@@ -668,7 +668,7 @@ circuit_establish_circuit(uint8_t purpose, extend_info_t *exit_ei, int flags)
     smartlist_free(sorted_node_list);
     smartlist_free(bw_list);
     smartlist_free(b_list);
-    pthread_mutex_unlock(shadow_global_circuit_list_lock);
+    circuit_shadow_global_circuit_list_unlock();
     log_info(LD_CIRC, "Tightrope circuit building method end.");
   } // End custom TR algorithm.
 

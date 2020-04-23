@@ -250,7 +250,8 @@ int circuit_count_pending_on_channel(channel_t *chan);
 void circuit_set_shadow_global_circuit_list(circuit_info_t** a);
 void circuit_set_shadow_global_circuit_list_lock(pthread_mutex_t* a);
 void circuit_set_shadow_global_circuit_list_counter(int* a);
-
+void circuit_shadow_global_circuit_list_lock(void);
+void circuit_shadow_global_circuit_list_unlock(void);
 #define circuit_mark_for_close(c, reason)                               \
   circuit_mark_for_close_((c), (reason), __LINE__, SHORT_FILE__)
 

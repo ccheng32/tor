@@ -815,6 +815,16 @@ circuit_set_shadow_global_circuit_list_lock(pthread_mutex_t* a) {
 }
 
 void
+circuit_shadow_global_circuit_list_lock(void) {
+  pthread_mutex_lock(shadow_global_circuit_list_lock);
+}
+
+void
+circuit_shadow_global_circuit_list_unlock(void) {
+  pthread_mutex_unlock(shadow_global_circuit_list_lock);
+}
+
+void
 circuit_set_shadow_global_circuit_list_counter(int* a) {
   shadow_global_circuit_list_counter = a;
 }
