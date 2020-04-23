@@ -5306,17 +5306,17 @@ options_init_from_torrc(int argc, char **argv)
     // scan list address
     circuit_info_t** tmp_shadow_global_circuit_list = NULL;
     sscanf(shadow_addr_line->value, "%p", &tmp_shadow_global_circuit_list);
-    log_info(LD_CONFIG, "BALANCE: Shared circuit list at address %p", shadow_global_circuit_list);
+    log_info(LD_CONFIG, "BALANCE: Shared circuit list at address %p", tmp_shadow_global_circuit_list);
     circuit_set_shadow_global_circuit_list(tmp_shadow_global_circuit_list);
     // scan list counter
     int* tmp_shadow_global_circuit_list_counter = NULL;
     sscanf(shadow_counter_addr_line->value, "%p", &tmp_shadow_global_circuit_list_counter);
-    log_info(LD_CONFIG, "BALANCE: Shared circuit list counter at address %p", shadow_global_circuit_list_counter);
+    log_info(LD_CONFIG, "BALANCE: Shared circuit list counter at address %p", tmp_shadow_global_circuit_list_counter);
     circuit_set_shadow_global_circuit_list_counter(tmp_shadow_global_circuit_list_counter);
     // scan lock address
-    pthread_mutex_t* tmp_shadow_global_ciurcuit_list_lock = NULL;
+    pthread_mutex_t* tmp_shadow_global_circuit_list_lock = NULL;
     sscanf(shadow_lock_addr_line->value, "%p", &tmp_shadow_global_circuit_list_lock);
-    log_info(LD_CONFIG, "BALANCE: Shared circuit list lock at address %p", shadow_global_circuit_list_lock);
+    log_info(LD_CONFIG, "BALANCE: Shared circuit list lock at address %p", tmp_shadow_global_circuit_list_lock);
     circuit_set_shadow_global_circuit_list_lock(tmp_shadow_global_circuit_list_lock);
 
   if (command == CMD_HASH_PASSWORD) {
