@@ -30,11 +30,6 @@ typedef struct relay_info
 } relay_info_t;
 
 
-
-circuit_info_t **shadow_global_circuit_list;
-int *shadow_global_circuit_list_counter;
-pthread_mutex_t *shadow_global_circuit_list_lock;
-
 /** Circuit state: I'm the origin, still haven't done all my handshakes. */
 #define CIRCUIT_STATE_BUILDING 0
 /** Circuit state: Waiting to process the onionskin. */
@@ -252,6 +247,10 @@ void circuit_get_all_pending_on_channel(smartlist_t *out,
                                         channel_t *chan);
 int circuit_count_pending_on_channel(channel_t *chan);
 
+void circuit_set_shadow_global_circuit_list(circuit_info_t** a);
+void circuit_set_shadow_global_circuit_list_lock(pthread_mutex_t* a);
+void circuit_set_shadow_global_circuit_list_counter(int* a);
+
 #define circuit_mark_for_close(c, reason)                               \
   circuit_mark_for_close_((c), (reason), __LINE__, SHORT_FILE__)
 
@@ -266,12 +265,6 @@ MOCK_DECL(void, channel_note_destroy_not_pending,
           (channel_t *chan, circid_t id));
 
 smartlist_t *circuit_find_circuits_to_upgrade_from_guard_wait(void);
-
-circuit_info_t*
-circuit_get_shadow_global_circuit_list(void);
-
-int
-circuit_get_shadow_global_circuit_list_size(void);
 
 #ifdef CIRCUITLIST_PRIVATE
 STATIC void circuit_free_(circuit_t *circ);

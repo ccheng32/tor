@@ -149,7 +149,30 @@ static void circuit_about_to_free(circuit_t *circ);
  */
 static int any_opened_circs_cached_val = 0;
 
+static circuit_info_t **shadow_global_circuit_list;
+static int *shadow_global_circuit_list_counter;
+static pthread_mutex_t *shadow_global_circuit_list_lock;
+
 /********* END VARIABLES ************/
+
+static circuit_info_t*
+circuit_get_shadow_global_circuit_list(void)
+{
+  // This if statement probably never executes
+  // the list should have been allocated in shadow
+  // design choice?
+  if (NULL == *shadow_global_circuit_list) {
+    *shadow_global_circuit_list = (circuit_info_t*) malloc(sizeof(circuit_info_t) * SHADOW_MAX_SHARED_CIRCUITS);
+    log_warn(LD_BUG, "BALANCE: Shared list in shadow is not initialized.");
+  }
+  return *shadow_global_circuit_list;
+}
+
+static int
+circuit_get_shadow_global_circuit_list_size(void)
+{
+  return *shadow_global_circuit_list_counter;
+}
 
 or_circuit_t *
 TO_OR_CIRCUIT(circuit_t *x)
@@ -654,25 +677,6 @@ circuit_add_to_origin_circuit_list(origin_circuit_t *origin_circ)
   origin_circ->global_origin_circuit_list_idx = smartlist_len(lst) - 1;
 }
 
-circuit_info_t*
-circuit_get_shadow_global_circuit_list(void)
-{
-  // This if statement probably never executes
-  // the list should have been allocated in shadow
-  // design choice?
-  if (NULL == *shadow_global_circuit_list) {
-    *shadow_global_circuit_list = (circuit_info_t*) malloc(sizeof(circuit_info_t) * SHADOW_MAX_SHARED_CIRCUITS);
-    log_warn(LD_BUG, "BALANCE: Shared list in shadow is not initialized.");
-  }
-  return *shadow_global_circuit_list;
-}
-
-int
-circuit_get_shadow_global_circuit_list_size(void)
-{
-  return *shadow_global_circuit_list_counter;
-}
-
 static void
 circuit_increment_shadow_global_circuit_list_size(void)
 {
@@ -798,6 +802,21 @@ circuit_add_to_shadow_global_circuit_list(origin_circuit_t *origin_circ, node_t*
   }
   origin_circ->shadow_global_circuit_list_idx = lst_size;
   circuit_increment_shadow_global_circuit_list_size();
+}
+
+void
+circuit_set_shadow_global_circuit_list(circuit_info_t** a) {
+  shadow_global_circuit_list = a;
+}
+
+void
+circuit_set_shadow_global_circuit_list_lock(pthread_mutex_t* a) {
+  shadow_global_circuit_list_lock = a;
+}
+
+void
+circuit_set_shadow_global_circuit_list_counter(int* a) {
+  shadow_global_circuit_list_counter = a;
 }
 
 /** Return a pointer to the global list of circuits. */
