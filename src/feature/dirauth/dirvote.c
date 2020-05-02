@@ -2294,7 +2294,9 @@ networkstatus_compute_consensus(smartlist_t *votes,
         relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
             relay_weight_est_compare_key_to_entry_, &found);
         if (!found) {
-          relay_weight_est_t* entry = relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers);
+          relay_weight_est_t* entry = mle_weight_round_counter > 1 ? 
+              relay_weight_est_t_new(rs_out.addr, 0.0):
+              relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers);
           smartlist_insert(mat, relay_idx, entry);
         }
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
