@@ -2294,13 +2294,16 @@ networkstatus_compute_consensus(smartlist_t *votes,
         relay_idx = smartlist_bsearch_idx(mat, &(rs_out.addr),
             relay_weight_est_compare_key_to_entry_, &found);
         if (!found) {
+          // Late join relays use 0 as the intial weight.
           relay_weight_est_t* entry = mle_weight_round_counter > 1 ? 
               relay_weight_est_t_new(rs_out.addr, 0.0):
               relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers);
           smartlist_insert(mat, relay_idx, entry);
         }
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
-        uint32_t published_bandwidth = mle_weight_round_counter > 0 ?
+        // If the relay has already been in the relay list in previous rounds, the MLE
+        // algorithm is used to estimate the bandwidth.
+        uint32_t published_bandwidth = found ?
             mle_compute_published_bandwidth(target_entry, rs_out.bandwidth_kb, flavor) :
             rs_out.bandwidth_kb;
         log_info(LD_DIR, "Target router: %x.", rs_out.addr);
