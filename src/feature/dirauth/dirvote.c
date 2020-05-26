@@ -129,6 +129,7 @@ typedef struct relay_weight_est {
   // TODO(ccheng32): Add a flag here to specify whether the relay is
   // active in this round.
   double* weight_array; 
+  int start_round;
 } relay_weight_est_t;
 
 
@@ -175,10 +176,11 @@ int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_membe
 }
 
 static 
-relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr, const double init_weight) {
+relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr, const double init_weight, const int start_round) {
   relay_weight_est_t* res = (relay_weight_est_t*) malloc(sizeof(relay_weight_est_t));
   res->addr = addr;
   res->prev_weight = init_weight;
+  res->start_round = start_round;
   res->prev_published_bandwidth = 0;
   res->weight_array = (double*) calloc(mle_weight_num_bins, sizeof(double));
   log_info(LD_DIR, "Bin values %x", res->addr);
@@ -2296,14 +2298,14 @@ networkstatus_compute_consensus(smartlist_t *votes,
         if (!found) {
           // Late join relays use 0 as the intial weight.
           relay_weight_est_t* entry = mle_weight_round_counter > 1 ? 
-              relay_weight_est_t_new(rs_out.addr, 0.0):
-              relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers);
+              relay_weight_est_t_new(rs_out.addr, 0.0, mle_weight_round_counter):
+              relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers, mle_weight_round_counter);
           smartlist_insert(mat, relay_idx, entry);
         }
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
         // If the relay has already been in the relay list in previous rounds, the MLE
         // algorithm is used to estimate the bandwidth.
-        uint32_t published_bandwidth = found ?
+        uint32_t published_bandwidth = found && mle_weight_round_counter != target_entry->start_round?
             mle_compute_published_bandwidth(target_entry, rs_out.bandwidth_kb, flavor) :
             rs_out.bandwidth_kb;
         log_info(LD_DIR, "Target router: %x.", rs_out.addr);
