@@ -68,6 +68,7 @@
 #define QUANTIZATION_BASE 1.1
 #define MIN_NOISE 0.6
 #define MAX_NOISE 1.3
+#define MLE_PAST_ROUND_NUM 3
 
 /* Algorithm to use for the bandwidth file digest. */
 #define DIGEST_ALG_BW_FILE DIGEST_SHA256
@@ -124,6 +125,8 @@ typedef struct pending_consensus_t {
 typedef struct relay_weight_est {
   uint32_t addr; /**< IPv4 address for this router, in host order. */
   double prev_weight;
+  double prev_weights[MLE_PAST_ROUND_NUM];
+  int prev_weights_idx;
   double* group_total_weight;
   uint32_t prev_published_bandwidth;
   // TODO(ccheng32): Add a flag here to specify whether the relay is
@@ -180,6 +183,8 @@ relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr, const double ini
   relay_weight_est_t* res = (relay_weight_est_t*) malloc(sizeof(relay_weight_est_t));
   res->addr = addr;
   res->prev_weight = init_weight;
+  res->prev_weights[0] = init_weight;
+  res->prev_weights_idx = 1;
   res->start_round = start_round;
   res->prev_published_bandwidth = 0;
   res->weight_array = (double*) calloc(mle_weight_num_bins, sizeof(double));
@@ -238,6 +243,14 @@ double husseins_noisy_poisson_function(int x_t1, int x_t2, double w_t, double ob
 }
 
 static
+double mle_compute_average_prev_weight(relay_weight_est_t* entry) {
+  double* a = entry->prev_weights;
+  double sum = 0.0;
+  for (int i = 0; i < MLE_PAST_ROUND_NUM; i++) sum += a[i];
+  return sum / MLE_PAST_ROUND_NUM;
+}
+
+static
 uint32_t mle_compute_published_bandwidth(
     relay_weight_est_t* entry, uint32_t obs, consensus_flavor_t flavor) {
   if (flavor == 0) {
@@ -252,7 +265,7 @@ uint32_t mle_compute_published_bandwidth(
       if (x_t1 > total_num_circ_est ) x_t1 = total_num_circ_est;
       if (entry->weight_array[i] > -DBL_MAX)
          entry->weight_array[i] += husseins_noisy_poisson_function(x_t1, x_t2,
-             entry->prev_weight, obs, mle_weight_bin_mids[i]);
+             mle_compute_average_prev_weight(entry), obs, mle_weight_bin_mids[i]);
     }
   }
 
@@ -2485,6 +2498,8 @@ networkstatus_compute_consensus(smartlist_t *votes,
     smartlist_t* final_mat = get_mle_weight_matrix();
     SMARTLIST_FOREACH_BEGIN(final_mat, relay_weight_est_t*, rwe) {
       rwe->prev_weight = (double) rwe->prev_published_bandwidth / *(rwe->group_total_weight);
+      rwe->prev_weights[rwe->prev_weights_idx] = rwe->prev_weight;
+      rwe->prev_weights_idx = (rwe->prev_weights_idx + 1) % MLE_PAST_ROUND_NUM;
     } SMARTLIST_FOREACH_END(rwe);
 
     tor_free(size);
