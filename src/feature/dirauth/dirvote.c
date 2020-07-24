@@ -69,6 +69,7 @@
 #define MIN_NOISE 0.6
 #define MAX_NOISE 1.3
 #define MLE_PAST_ROUND_NUM 3
+#define MLE_MAX_OBS 100000
 
 /* Algorithm to use for the bandwidth file digest. */
 #define DIGEST_ALG_BW_FILE DIGEST_SHA256
@@ -132,7 +133,10 @@ typedef struct relay_weight_est {
   // TODO(ccheng32): Add a flag here to specify whether the relay is
   // active in this round.
   double* weight_array; 
+  double* mids;
+  int num_mids;
   int start_round;
+  int mle_start;
 } relay_weight_est_t;
 
 
@@ -157,6 +161,8 @@ static int dirvote_publish_consensus(void);
 
 static int mle_weight_num_bins;
 static double* mle_weight_bin_mids;
+static int mle_weight_num_bins_double;
+static double* mle_weight_bin_mids_double;
 static smartlist_t* get_mle_weight_matrix(void);
 static smartlist_t* mle_weight_matrix;
 static int total_num_circ_est;
@@ -179,18 +185,23 @@ int relay_weight_est_compare_key_to_entry_(const void *_key, const void **_membe
 }
 
 static 
-relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr, const double init_weight, const int start_round) {
+relay_weight_est_t* relay_weight_est_t_new(const uint32_t addr, const double init_weight, const int start_round, const int is_exit) {
   relay_weight_est_t* res = (relay_weight_est_t*) malloc(sizeof(relay_weight_est_t));
   res->addr = addr;
   res->prev_weight = init_weight;
-  res->prev_weights[0] = init_weight;
-  res->prev_weights_idx = 1;
+  res->prev_weights[0] = 0.0;
+  res->prev_weights_idx = 0;
   res->start_round = start_round;
+  res->mle_start = 0;
   res->prev_published_bandwidth = 0;
-  res->weight_array = (double*) calloc(mle_weight_num_bins, sizeof(double));
-  log_info(LD_DIR, "Bin values %x", res->addr);
-  for (int i = 0; i < mle_weight_num_bins; i++)
-    log_info(LD_DIR, "%lf: %lf", mle_weight_bin_mids[i], res->weight_array[i]);
+  if (is_exit) {
+    res->mids = mle_weight_bin_mids;
+    res->num_mids = mle_weight_num_bins;
+  } else {
+    res->mids = mle_weight_bin_mids_double;
+    res->num_mids = mle_weight_num_bins_double;
+  }
+  res->weight_array = (double*) calloc(res->num_mids, sizeof(double));
   return res;
 }
 
@@ -246,17 +257,29 @@ static
 double mle_compute_average_prev_weight(relay_weight_est_t* entry) {
   double* a = entry->prev_weights;
   double sum = 0.0;
-  for (int i = 0; i < MLE_PAST_ROUND_NUM; i++) sum += a[i];
+  for (int i = 0; i < MLE_PAST_ROUND_NUM; i++) {
+    log_info(LD_DIR, "Prev weight: %lf", a[i]);
+    sum += a[i];
+  }
+  log_info(LD_DIR, "Average weight %x: %lf", entry->addr, sum / MLE_PAST_ROUND_NUM);
   return sum / MLE_PAST_ROUND_NUM;
 }
 
 static
 uint32_t mle_compute_published_bandwidth(
     relay_weight_est_t* entry, uint32_t obs, consensus_flavor_t flavor) {
+  int only_use_one_past = 0;
+  if (obs > MLE_MAX_OBS && entry->mle_start == 0) {
+    log_notice(LD_DIR, "Max observation for MLE reached at %d.", obs);
+    return obs;
+  } else {
+    entry->mle_start = 1;
+    only_use_one_past = 1;
+  }
   if (flavor == 0) {
-    for (int i = 0; i < mle_weight_num_bins; i++) {
-      int x_t1 = (int) round(MIN_NOISE * mle_weight_bin_mids[i] / obs - 1.0);
-      int x_t2 = (int) round(MAX_NOISE * mle_weight_bin_mids[i] / obs - 1.0);
+    for (int i = 0; i < entry->num_mids; i++) {
+      int x_t1 = (int) round(MIN_NOISE * entry->mids[i] / obs - 1.0);
+      int x_t2 = (int) round(MAX_NOISE * entry->mids[i] / obs - 1.0);
       if (x_t1 < 0) x_t1 = 0;
       if (x_t2 < 0 || x_t1 > total_num_circ_est) {
         entry->weight_array[i] = -DBL_MAX;
@@ -265,23 +288,24 @@ uint32_t mle_compute_published_bandwidth(
       if (x_t1 > total_num_circ_est ) x_t1 = total_num_circ_est;
       if (entry->weight_array[i] > -DBL_MAX)
          entry->weight_array[i] += husseins_noisy_poisson_function(x_t1, x_t2,
-             mle_compute_average_prev_weight(entry), obs, mle_weight_bin_mids[i]);
+             //mle_weight_round_counter > 1 && only_use_one_past != 1 ? mle_compute_average_prev_weight(entry) : entry->prev_weight, obs, entry->mids[i]);
+             entry->prev_weight, obs, entry->mids[i]);
     }
   }
 
   // Find the maximum entry.
   double max_mid = 0.0, max_array_entry = -DBL_MAX;
-  for (int i = 0; i < mle_weight_num_bins; i++) {
+  for (int i = 0; i < entry->num_mids; i++) {
     if (entry->weight_array[i] > max_array_entry) {
       max_array_entry = entry->weight_array[i];
-      max_mid = mle_weight_bin_mids[i];
+      max_mid = entry->mids[i];
     }
   }
 
   // Log the matrix values.
   log_info(LD_DIR, "Bin values %x", entry->addr);
-  for (int i = 0; i < mle_weight_num_bins; i++)
-    log_info(LD_DIR, "%lf: %lf", mle_weight_bin_mids[i], entry->weight_array[i]);
+  for (int i = 0; i < entry->num_mids; i++)
+    log_info(LD_DIR, "%lf: %lf", entry->mids[i], entry->weight_array[i]);
 
   return (uint32_t) max_mid;
 }
@@ -2311,8 +2335,8 @@ networkstatus_compute_consensus(smartlist_t *votes,
         if (!found) {
           // Late join relays use 0 as the intial weight.
           relay_weight_est_t* entry = mle_weight_round_counter > 1 ? 
-              relay_weight_est_t_new(rs_out.addr, 0.0, mle_weight_round_counter):
-              relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers, mle_weight_round_counter);
+              relay_weight_est_t_new(rs_out.addr, 0.0, mle_weight_round_counter, is_exit):
+              relay_weight_est_t_new(rs_out.addr, 1.0 / num_routers, mle_weight_round_counter, is_exit);
           smartlist_insert(mat, relay_idx, entry);
         }
         relay_weight_est_t* target_entry = smartlist_get(mat, relay_idx);
@@ -4611,13 +4635,24 @@ smartlist_t* get_mle_weight_matrix(void) {
 void dirvote_set_mle_weight_num_bins(int min_b, int max_b) {
   double bounded_min_b = min_b - QUANTIZATION_BASE / 2;
   mle_weight_num_bins = (int)ceil(log((double)max_b - bounded_min_b) / log(QUANTIZATION_BASE));
+  mle_weight_num_bins_double = (int)ceil(log((double)max_b * 2.0 - bounded_min_b) / log(QUANTIZATION_BASE));
   mle_weight_bin_mids = (double*) malloc(sizeof(double) * mle_weight_num_bins);
+  mle_weight_bin_mids_double = (double*) malloc(sizeof(double) * mle_weight_num_bins_double);
   double base = 1.0, curr = (double) bounded_min_b, next;
   for (int i = 0; i < mle_weight_num_bins; i++) {
     base *= QUANTIZATION_BASE;
     next = bounded_min_b + base;
     mle_weight_bin_mids[i] = (curr + next) / 2.0;
     log_info(LD_DIR, "Mid %d: %lf", i, mle_weight_bin_mids[i]);
+    curr = next;
+  }
+  curr = (double) bounded_min_b;
+  base = 1.0;
+  for (int i = 0; i < mle_weight_num_bins_double; i++) {
+    base *= QUANTIZATION_BASE;
+    next = bounded_min_b + base;
+    mle_weight_bin_mids_double[i] = (curr + next) / 2.0;
+    log_info(LD_DIR, "Mid %d: %lf", i, mle_weight_bin_mids_double[i]);
     curr = next;
   }
   log_info(LD_DIR, "Created %d bins with min %lf and Max %lf.", mle_weight_num_bins,
